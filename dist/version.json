@@ -1,0 +1,14 @@
+{
+  "order": {
+    "versionCode": 8,
+    "versionName": "1.7",
+    "url": "https://gitee.com/Quriosity233/love/raw/master/xiaowo-order.apk",
+    "notes": "问题修复与体验优化"
+  },
+  "recv": {
+    "versionCode": 8,
+    "versionName": "1.7",
+    "url": "https://gitee.com/Quriosity233/love/raw/master/xiaowo-recv.apk",
+    "notes": "问题修复与体验优化"
+  }
+}
