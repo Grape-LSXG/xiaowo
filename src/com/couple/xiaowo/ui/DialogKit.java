@@ -313,6 +313,36 @@ public final class DialogKit {
         close(dlg);
     }
 
+    /**
+     * 不可取消的确认框：返回键 / 点外部都不能关闭。
+     * 用于启动时的强制权限引导 —— 权限没配好就不让进主界面。
+     */
+    public static Dialog customBlocking(Activity act, String title, String bodyText,
+                                        String okText, final Runnable onOk) {
+        Dialog dlg = custom(act, title, okOnlyView(act, bodyText), okText, new Runnable() {
+            @Override
+            public void run() {
+                if (onOk != null) {
+                    onOk.run();
+                }
+            }
+        });
+        if (dlg != null) {
+            dlg.setCancelable(false);
+            dlg.setCanceledOnTouchOutside(false);
+        }
+        return dlg;
+    }
+
+    private static View okOnlyView(Activity act, String bodyText) {
+        LinearLayout box = Ui.vertical(act);
+        box.setPadding(Ui.dpi(act, 8), Ui.dpi(act, 4), Ui.dpi(act, 8), Ui.dpi(act, 4));
+        String text = (bodyText == null || bodyText.length() == 0)
+                ? "授权完成后回到 App，会自动继续。" : bodyText;
+        box.addView(Ui.tv(act, text, 12, Ui.TEXT_SUB, false));
+        return box;
+    }
+
     // ================================================================ 骨架
 
     /** 一整套对话框的骨架：窗口 + 白色卡片 + 渐变标题条 + 正文容器 */
