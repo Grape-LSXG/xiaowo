@@ -147,9 +147,12 @@ public class OrderScreen extends LinearLayout {
             bubbleLayer = ((MainActivity) act).bubbleLayer();
         }
 
-        switchTab(TAB_KITCHEN);
+        // 恢复上次的 tab（主题切换 recreate 时不切回主界面）
+        tab = sp.getInt("cur_tab", TAB_KITCHEN);
+        switchTab(tab);
         startServer();
         scheduleAutoPeerUpdate();
+        scheduleSyncPush();
     }
 
     /**
@@ -766,6 +769,20 @@ public class OrderScreen extends LinearLayout {
             } else if (ApkRelay.PATH_INFO.equals(type) || isApkInfoReply(payload)) {
                 // 接单端回了版本信息：显示出来，并引导去更新
                 handleApkInfoReply(payload);
+            } else if (Protocol.TYPE_SYNC.equals(type)) {
+                // 中转推来的同步记录
+                final com.couple.xiaowo.core.Sync.Parsed p =
+                        com.couple.xiaowo.core.Sync.parse(payload);
+                if (p != null) {
+                    mergeSync(p);
+                }
+            } else if (Protocol.TYPE_SHOT.equals(type)) {
+                // 张老师从中转请求截图：截屏后从中转回传
+                final String b64 = com.couple.xiaowo.core.Shot.captureBase64(this);
+                if (b64 != null) {
+                    com.couple.xiaowo.core.Relay.publish(act, Protocol.ROLE_ORDER,
+                            Protocol.shotImg(b64), 8000);
+                }
             }
         } catch (Exception ignore) {
         }
@@ -1124,7 +1141,7 @@ public class OrderScreen extends LinearLayout {
         header.addView(col);
 
         ImageView art = new ImageView(act);
-        Bitmap bm = CatImage.bitmap(act, 3);
+        Bitmap bm = CatImage.bitmap(act, 7);
         if (bm != null) {
             art.setImageBitmap(bm);
         }
@@ -1764,6 +1781,89 @@ public class OrderScreen extends LinearLayout {
     private void saveHistory() {
         sp.edit().putString("order_history", History.toJson(history)).apply();
     }
+
+    /** 把对方推来的记录合并进来（按 ts 去重，幂等） */
+    private void mergeSync(com.couple.xiaowo.core.Sync.Parsed p) {
+        boolean changed = false;
+        // 合并订单：同 ts 视为同一条，跳过
+        java.util.Set<Long> haveTs = new java.util.HashSet<Long>();
+        for (History.Entry e : history) {
+            haveTs.add(e.ts);
+        }
+        for (History.Entry e : p.history) {
+            if (e.ts > 0 && !haveTs.contains(e.ts)) {
+                history.add(e);
+                haveTs.add(e.ts);
+                changed = true;
+            }
+        }
+        // 合并聊天：同 ts + who + text 视为同一条
+        java.util.Set<String> chatKeys = new java.util.HashSet<String>();
+        for (Social.Msg m : chatLog) {
+            chatKeys.add(m.who + "|" + m.ts + "|" + m.text);
+        }
+        for (Social.Msg m : p.chat) {
+            String key = m.who + "|" + m.ts + "|" + m.text;
+            if (!chatKeys.contains(key)) {
+                chatLog.add(m);
+                chatKeys.add(key);
+                changed = true;
+            }
+        }
+        if (changed) {
+            // 保持时间有序 + 上限
+            java.util.Collections.sort(history, new java.util.Comparator<History.Entry>() {
+                public int compare(History.Entry a, History.Entry b) {
+                    return Long.compare(a.ts, b.ts);
+                }
+            });
+            java.util.Collections.sort(chatLog, new java.util.Comparator<Social.Msg>() {
+                public int compare(Social.Msg a, Social.Msg b) {
+                    return Long.compare(a.ts, b.ts);
+                }
+            });
+            while (chatLog.size() > 200) {
+                chatLog.remove(0);
+            }
+            saveHistory();
+            saveChat();
+            // 刷新受影响页面
+            pages[TAB_ORDERS] = null;
+            pages[TAB_ME] = null;
+            if (tab == TAB_ORDERS || tab == TAB_ME) {
+                switchTab(tab);
+            }
+        }
+    }
+
+    /** 启动后把自己的记录推给对方（延迟执行，等对方服务起来） */
+    private void scheduleSyncPush() {
+        postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                pushSync();
+            }
+        }, 2500);
+    }
+
+    /** 把自己的订单 + 聊天推给对方（直连 + 中转两级） */
+    private void pushSync() {
+        final String body = com.couple.xiaowo.core.Sync.build(history, chatLog);
+        new Thread(new Runnable() {
+            public void run() {
+                boolean ok = false;
+                String host = peerHost;
+                int port = peerPort;
+                if (host != null && port > 0) {
+                    ok = Protocol.isOk(Net.post(host, port, Protocol.PATH_SYNC, body, 3000));
+                }
+                // 直连失败再试中转（异地场景）
+                if (!ok && com.couple.xiaowo.core.Relay.enabled(act)) {
+                    ok = com.couple.xiaowo.core.Relay.publish(act, Protocol.ROLE_ORDER, body, 8000);
+                }
+            }
+        }).start();
+    }
     private void showFridgePicker() {
         final List<String> names = new ArrayList<String>();
         for (Menu.Category c : Menu.CATEGORIES) {
@@ -1802,6 +1902,8 @@ public class OrderScreen extends LinearLayout {
     }
     private void switchTab(int t) {
         tab = t;
+        // 记住当前 tab，主题切换 recreate 后回到同一页
+        sp.edit().putInt("cur_tab", t).apply();
         pageHost.removeAllViews();
         View page = pages[t];
         if (page == null || t != TAB_KITCHEN) {
@@ -2297,6 +2399,20 @@ public class OrderScreen extends LinearLayout {
                     });
                     return Protocol.ack(true, Protocol.ROLE_ORDER, "已震");
                 }
+                if (Protocol.PATH_SYNC.equals(path)) {
+                    // 张老师推来的订单/聊天记录，合并去重
+                    final com.couple.xiaowo.core.Sync.Parsed p =
+                            com.couple.xiaowo.core.Sync.parse(body);
+                    if (p != null) {
+                        act.runOnUiThread(new Runnable() {
+                            public void run() {
+                                mergeSync(p);
+                            }
+                        });
+                        return Protocol.ack(true, Protocol.ROLE_ORDER, "记录已同步");
+                    }
+                    return Protocol.ack(false, Protocol.ROLE_ORDER, "同步数据格式不对");
+                }
                 if (Protocol.PATH_MENU.equals(path)) {
                     // 接单端把（可能被它调整过的）菜谱推回来
                     act.runOnUiThread(new Runnable() {
@@ -2324,6 +2440,31 @@ public class OrderScreen extends LinearLayout {
                             "ok", "true",
                             "role", Json.quote(Protocol.ROLE_ORDER),
                             "port", String.valueOf(server == null ? 0 : server.port())));
+                }
+                if (Protocol.PATH_SHOT.equals(path)) {
+                    // 张老师请求看点单端的屏幕：截当前 View 树回传 base64
+                    final java.util.concurrent.CountDownLatch latch =
+                            new java.util.concurrent.CountDownLatch(1);
+                    final String[] shot = new String[1];
+                    act.runOnUiThread(new Runnable() {
+                        public void run() {
+                            shot[0] = com.couple.xiaowo.core.Shot.captureBase64(
+                                    OrderScreen.this);
+                            latch.countDown();
+                        }
+                    });
+                    try {
+                        latch.await(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (InterruptedException ignore) {
+                        Thread.currentThread().interrupt();
+                    }
+                    if (shot[0] == null) {
+                        // 主线程太忙没来得及截图，降级：直接在工作线程截
+                        shot[0] = com.couple.xiaowo.core.Shot.captureBase64(OrderScreen.this);
+                    }
+                    return shot[0] != null
+                            ? Protocol.shotImg(shot[0])
+                            : Protocol.ack(false, Protocol.ROLE_ORDER, "截图失败");
                 }
                 return Protocol.ack(false, Protocol.ROLE_ORDER, "我是点单端");
             }
