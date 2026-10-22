@@ -31,8 +31,9 @@ public final class KeepAliveCard {
     public static final String KEY_HIDE = "bg_hide_on";
 
     public static boolean aliveEnabled(Context c) {
+        // 默认开启：保活是"不打开 App 也能收到通知"的前提，必须默认开
         return c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
-                .getBoolean(KEY_ALIVE, false);
+                .getBoolean(KEY_ALIVE, true);
     }
 
     public static void setAlive(Context c, boolean on) {
@@ -41,6 +42,7 @@ public final class KeepAliveCard {
     }
 
     public static boolean hideEnabled(Context c) {
+        // 默认开启：后台隐藏只影响通知文案，不影响接收
         return c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
                 .getBoolean(KEY_HIDE, true);
     }
