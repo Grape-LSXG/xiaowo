@@ -232,3 +232,74 @@ MQTT 中转是**推送**：连上之后对方发过来会立即到达，不产�
 
 **我的建议**：先用着现在的方案。如果实际用下来觉得"点了单对方半天没反应"，
 再考虑方案 A。
+
+
+---
+
+# 已经做好了（2026-10-22）
+
+## 仓库
+
+<https://github.com/Grape-LSXG/xiaowo>
+
+源码已推送（71 个文件，已排除密钥 / SDK / 24MB 的 frpc）。
+
+## Releases
+
+| tag | 内容 |
+|---|---|
+| `order-v22` / `order-v23` | 点单端 APK |
+| `recv-v22` / `recv-v23` | 接单端 APK（6MB） |
+
+## 实测结果（全部用 App 里同一份 `GithubRelease` 代码跑）
+
+```
+releases 数量 = 4
+  前缀 order -> tag=order-v23  versionCode=23  asset=xiaowo-order-v23.apk  754973 bytes
+  前缀 recv  -> tag=recv-v23   versionCode=23  asset=xiaowo-recv-v23.apk  6280701 bytes
+```
+
+下载验证：
+
+```
+HTTP=200  size=754973
+SHA256 与本地构建完全一致 ✓
+合法 APK，19 个条目
+```
+
+## 以后怎么发版
+
+```bash
+bash build.sh                                   # 构建（versionCode 在 manifest 里改）
+GITHUB_TOKEN=<你的pat> bash tools/release.sh    # 自动建 release + 传 APK
+```
+
+`tools/release.sh` 会：
+1. 从 `AndroidManifest.xml.in` 读 versionCode / versionName
+2. 建 `order-v<vc>` 和 `recv-v<vc>` 两个 release
+3. 把两个 APK 作为 asset 传上去
+4. tag 已存在时自动复用，不会报错
+
+**以后每次改完代码，跑这两条命令就发布完成了。**
+用户那边打开 App 会自动检查到新版。
+
+## 踩到的两个坑（记一下）
+
+### 坑 1：`raw.githubusercontent.com` 不通
+
+这台机器上 **HTTP 000**（被墙），所以代码里刻意**不用 raw 直链**：
+
+- 查版本 → `api.github.com/repos/.../releases` ✅
+- 下载 APK → release 的 **asset API url** + `Accept: application/octet-stream`
+  （会 302 到 `release-assets.githubusercontent.com`，那条通）✅
+
+如果哪天有人在别的网络环境下测试发现"检查更新失败"，
+第一件要确认的就是这两个域名的可达性。
+
+### 坑 2：release 脚本第一次跑失败
+
+第一次上传 asset 时失败，导致 `order-v23` 建出来了但没附件，
+紧接着第二个 release 创建时撞上已存在的 tag 报 422，脚本整个中断。
+
+修法：`ensure_release()` —— 创建失败就回查已存在的 release 拿 id 复用，
+并且在 asset 上传失败时明确报错而不是静默继续。
