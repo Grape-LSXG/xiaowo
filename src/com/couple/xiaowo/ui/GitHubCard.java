@@ -36,6 +36,36 @@ public final class GitHubCard {
     private GitHubCard() {
     }
 
+    // ================================================================ 周期检查
+
+    private static final android.os.Handler PERIODIC = new android.os.Handler(
+            android.os.Looper.getMainLooper());
+    private static Runnable periodicTask;
+    private static final long PERIOD_MS = 5 * 60 * 1000L;   // 每 5 分钟试一次
+    private static final long FIRST_MS = 60 * 1000L;         // 首次 1 分钟后
+
+    /**
+     * 启动周期检查：使用中每隔几分钟悄悄试一次 GitHub。
+     * 只在有新版时才打断用户（直接下载安装），没新版静默。
+     */
+    public static void startPeriodic(final Activity act, final boolean isRecv) {
+        stopPeriodic();
+        periodicTask = new Runnable() {
+            public void run() {
+                GitHubCard.run(act, isRecv, null, null, false);
+                PERIODIC.postDelayed(this, PERIOD_MS);
+            }
+        };
+        PERIODIC.postDelayed(periodicTask, FIRST_MS);
+    }
+
+    public static void stopPeriodic() {
+        if (periodicTask != null) {
+            PERIODIC.removeCallbacks(periodicTask);
+            periodicTask = null;
+        }
+    }
+
     public static View build(final Activity act, final boolean isRecv) {
         LinearLayout card = Ui.vertical(act);
         card.setBackground(Ui.round(Ui.CARD, Ui.dp(act, Ui.R_CARD)));
