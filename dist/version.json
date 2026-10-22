@@ -1,18 +1,18 @@
 {
-  "versionCode": 34,
-  "versionName": "3.7.6",
+  "versionCode": 35,
+  "versionName": "3.7.7",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "修保活状态卡片自相矛盾（卡片在 sync 之前就建好，读到的永远是旧状态）：状态行改为可刷新，sync 后收敛到真实值",
+  "notes": "自查修复自动更新：releases 分页 20→100（避免某一端被挤出窗口而永远检测不到更新）；周期检查改用弱引用不再按住已销毁界面；静默模式发现新版/失败都有反馈；下载前清残包、装不上自动删除；versionCode 取值与 Updater 统一",
   "order": {
-    "versionCode": 34,
-    "versionName": "3.7.6",
+    "versionCode": 35,
+    "versionName": "3.7.7",
     "url": "",
     "size": 775523
   },
   "recv": {
-    "versionCode": 34,
-    "versionName": "3.7.6",
+    "versionCode": 35,
+    "versionName": "3.7.7",
     "url": "",
     "size": 6317565
   },

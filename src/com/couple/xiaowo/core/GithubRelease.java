@@ -1,6 +1,7 @@
 package com.couple.xiaowo.core;
 
 import android.content.Context;
+import android.os.Build;
 import android.content.SharedPreferences;
 
 import java.io.File;
@@ -100,8 +101,20 @@ public final class GithubRelease {
             public void run() {
                 try {
                     String repo = repo(c);
+                    /*
+                     * 取 100 条而不是 20 条。
+                     *
+                     * 为什么：GitHub 的 releases 是**按时间倒序混排**的 ——
+                     * 点单端和接单端的 release 交错在一起。
+                     * 每发一次版消耗 2 条，per_page=20 只够 10 个版本。
+                     * 超过之后，较早的那一端（实际是 order，因为 release.sh
+                     * 先建 order 再建 recv，同版本里 order 更靠后）会被挤出窗口，
+                     * 那一端就**永远检测不到更新** —— 表现为"自动更新在某一端失灵"。
+                     *
+                     * 100 是 GitHub 允许的上限，足够撑很久。
+                     */
                     String body = getJson("https://api.github.com/repos/" + repo
-                            + "/releases?per_page=20");
+                            + "/releases?per_page=100");
                     Object arr = Json.parse(body);
                     if (!(arr instanceof java.util.List)) {
                         cb.done(null, "GitHub 返回格式不对");
@@ -145,8 +158,17 @@ public final class GithubRelease {
                         if (best == null || vc > best.versionCode) {
                             best = new Release();
                             best.versionCode = vc;
-                            best.versionName = tag.substring(wantPrefix.length() + 1)
-                                    .replace("-", "");
+                            /*
+                             * versionName 只用来显示。
+                             *
+                             * 原来这里是 tag.substring(...) —— 对 `order-v34`
+                             * 会算出 "34"，界面上就显示成 "v34"，很怪。
+                             * release 的 name 字段是人写的（如「点单端 v3.7.6」），
+                             * 优先用它；没有就退回 tag 本身。
+                             */
+                            String relName = Json.str(rel, "name", "");
+                            best.versionName = (relName != null && relName.length() > 0)
+                                    ? relName : tag;
                             best.tag = tag;
                             best.notes = shorten(Json.str(rel, "body", ""), 300);
                             best.assetName = assetName;
@@ -365,9 +387,21 @@ public final class GithubRelease {
         void done(File apk, long bytes, String error);
     }
 
+    /**
+     * 本机安装的 versionCode。
+     *
+     * 必须和 Updater 用同一套取法：Android 9 (API 28) 起 versionCode 是 long，
+     * 直接用已弃用的 int 字段在 targetSdk 34 上语义不一致，
+     * 极端情况会拿错值 —— 那样"有没有新版"的判断就会错。
+     */
     public static int currentVersionCode(Context c) {
         try {
-            return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionCode;
+            android.content.pm.PackageInfo pi =
+                    c.getPackageManager().getPackageInfo(c.getPackageName(), 0);
+            if (Build.VERSION.SDK_INT >= 28) {
+                return (int) pi.getLongVersionCode();
+            }
+            return pi.versionCode;
         } catch (Exception e) {
             return 0;
         }

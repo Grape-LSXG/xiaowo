@@ -3,6 +3,7 @@ package com.couple.xiaowo.ui;
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -44,26 +45,48 @@ public final class GitHubCard {
     private static final long PERIOD_MS = 5 * 60 * 1000L;   // 每 5 分钟试一次
     private static final long FIRST_MS = 60 * 1000L;         // 首次 1 分钟后
 
+    /** 周期检查当前绑定的 Activity（弱引用，避免把已销毁的界面按住不放） */
+    private static java.lang.ref.WeakReference<Activity> periodicAct;
+    private static boolean periodicIsRecv;
+
     /**
      * 启动周期检查：使用中每隔几分钟悄悄试一次 GitHub。
      * 只在有新版时才打断用户（直接下载安装），没新版静默。
+     *
+     * 用弱引用而不是直接捕获 Activity：主题切换 / 授权返回都会 recreate，
+     * 旧的 Activity 已经 destroy，但静态 Handler 还在跑。捕获强引用会：
+     *   · 泄漏整个旧界面（含 View 树）
+     *   · 下载完成时 act.runOnUiThread 往一个已销毁的 Activity 上回调
+     *
+     * 现在每一轮都重新取当前 Activity；取不到（进程里已经没有界面）就跳过这一轮。
      */
     public static void startPeriodic(final Activity act, final boolean isRecv) {
         stopPeriodic();
+        periodicAct = new java.lang.ref.WeakReference<Activity>(act);
+        periodicIsRecv = isRecv;
         periodicTask = new Runnable() {
             public void run() {
-                GitHubCard.run(act, isRecv, null, null, false);
-                PERIODIC.postDelayed(this, PERIOD_MS);
+                Activity cur = periodicAct == null ? null : periodicAct.get();
+                if (cur != null && !cur.isFinishing()
+                        && (Build.VERSION.SDK_INT < 17 || !cur.isDestroyed())) {
+                    GitHubCard.run(cur, periodicIsRecv, null, null, false);
+                }
+                // 无论这一轮有没有跑，都继续排下一轮
+                if (periodicTask == this) {
+                    PERIODIC.postDelayed(this, PERIOD_MS);
+                }
             }
         };
         PERIODIC.postDelayed(periodicTask, FIRST_MS);
     }
 
     public static void stopPeriodic() {
-        if (periodicTask != null) {
-            PERIODIC.removeCallbacks(periodicTask);
-            periodicTask = null;
+        Runnable t = periodicTask;
+        periodicTask = null;
+        if (t != null) {
+            PERIODIC.removeCallbacks(t);
         }
+        periodicAct = null;
     }
 
     public static View build(final Activity act, final boolean isRecv) {
@@ -175,7 +198,15 @@ public final class GitHubCard {
                             if (status != null && interactive) {
                                 status.setTextColor(Theme.adapt(Ui.WARN));
                                 status.setText(error);
+                            } else if (status != null) {
+                                // 静默模式但有状态栏可写：记一句，别让用户以为没检查
+                                status.setTextColor(Theme.adapt(Ui.WARN));
+                                status.setText(error);
                             }
+                            /*
+                             * 自动检查失败不弹 Toast —— 网络抖动是常态，
+                             * 每次开 App 都弹一次会很吵。下一轮周期检查会再试。
+                             */
                             return;
                         }
                         if (rel == null) {
@@ -188,11 +219,20 @@ public final class GitHubCard {
                             }
                             return;
                         }
-                        // 发现新版：直接下载并安装，不再弹确认框
+                        /*
+                         * 发现新版：直接下载并安装。
+                         *
+                         * 静默模式（status == null，自动检查走这条）以前什么都不显示 ——
+                         * 用户在下载完成、系统安装器弹出之前完全无感；
+                         * 一旦下载失败，就成了"自动更新好像没工作"。
+                         * 现在至少给一条 Toast，让整个过程可感知。
+                         */
                         if (status != null) {
                             status.setTextColor(Theme.adapt(Ui.PRIMARY_DEEP));
                             status.setText("发现新版 " + rel.versionName
                                     + "（" + (rel.size / 1024) + " KB），开始下载…");
+                        } else {
+                            Toast2.info(act, "发现新版 " + rel.versionName + "，正在后台下载…");
                         }
                         downloadAndInstall(act, rel, status);
                     }
@@ -205,6 +245,19 @@ public final class GitHubCard {
                                            final GithubRelease.Release rel,
                                            final TextView status) {
         final File out = new File(act.getCacheDir(), "gh-" + rel.versionCode + ".apk");
+        /*
+         * 同名残包先删掉。
+         *
+         * 文件名只含 versionCode（gh-34.apk），如果上一次下载到一半中断，
+         * 这个文件会留在缓存里。GithubRelease.download 现在虽然会校验长度，
+         * 但**先从干净状态开始**永远最省事 —— 也让重试行为可预期。
+         */
+        try {
+            if (out.exists()) {
+                out.delete();
+            }
+        } catch (Exception ignore) {
+        }
         GithubRelease.download(act, rel, out, new GithubRelease.DownloadCallback() {
             public void onProgress(final int pct) {
                 act.runOnUiThread(new Runnable() {
@@ -240,6 +293,28 @@ public final class GitHubCard {
                         String err = Updater.install(act, apk);
                         if (err != null && err.length() > 0) {
                             Toast2.warn(act, err);
+                            // 装不上就把包删掉，别让它下次被当成"已下载"
+                            try {
+                                apk.delete();
+                            } catch (Exception ignore) {
+                            }
+                        } else {
+                            /*
+                             * 已经交给系统安装器了。这里**不能**立刻删 ——
+                             * 安装器还要读这个文件。等一会儿再清，
+                             * 而且只清旧的（安装完通常会重启进程，不重启时兜底）。
+                             */
+                            final File toClean = apk;
+                            PERIODIC.postDelayed(new Runnable() {
+                                public void run() {
+                                    try {
+                                        if (toClean.exists()) {
+                                            toClean.delete();
+                                        }
+                                    } catch (Exception ignore) {
+                                    }
+                                }
+                            }, 120000L);
                         }
                     }
                 });
