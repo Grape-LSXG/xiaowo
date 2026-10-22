@@ -124,6 +124,14 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
         switchTab(TAB_KITCHEN);
         startListening();
+
+        // 启动时自动检查 GitHub 更新（默认开启，发现新版直接下载安装）
+        postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                GitHubCard.run(act, true, null, null, false);
+            }
+        }, 1500);
     }
 
     private int dp(float v) {
