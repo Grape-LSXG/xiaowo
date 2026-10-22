@@ -1,20 +1,20 @@
 {
-  "versionCode": 38,
-  "versionName": "4.0.2",
+  "versionCode": 39,
+  "versionName": "4.1",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "正式版 4.0.2：菜谱规格（预制菜配常用规格 + 自定义菜谱可编辑规格）；运行权限卡片改为中性表述且全部就绪自动收起；自动更新改名手动更新并去掉启动自动检查；新增电池优化引导与 vivo 后台高耗电首次提示；修复截图并发、MQTT 订阅泄漏、菜单指纹漏规格、保活状态不一致",
+  "notes": "移除 SakuraFrp/frpc（接单端 6.1MB→1.5MB）；修复规格相关 bug（减号按规格减、冰箱存规格并显示、历史与订单显示规格、旧菜单覆盖导致规格丢失）；修复菜谱同步重复合并、菜谱不落盘、聊天与公告重启丢失",
   "order": {
-    "versionCode": 38,
-    "versionName": "4.0.2",
+    "versionCode": 39,
+    "versionName": "4.1",
     "url": "",
-    "size": 779619
+    "size": 767331
   },
   "recv": {
-    "versionCode": 38,
-    "versionName": "4.0.2",
+    "versionCode": 39,
+    "versionName": "4.1",
     "url": "",
-    "size": 6325757
+    "size": 1533367
   },
-  "size": 779619
+  "size": 767331
 }

@@ -27,7 +27,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.couple.xiaowo.core.ApkRelay;
-import com.couple.xiaowo.core.FrpcRunner;
 import com.couple.xiaowo.core.History;
 import com.couple.xiaowo.core.Json;
 import com.couple.xiaowo.core.Menu;
@@ -51,10 +50,10 @@ import java.util.Map;
  *   厨房 接单主页（状态 + 最近一单）
  *   订单 收到的全部订单
  *   冰箱 TA 常点的菜
- *   管理 端口 / 穿透引擎 / 服务开关
+ *   管理 端口 / 异地通道 / 服务开关
  *   我   关于
  */
-public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
+public class RecvScreen extends LinearLayout {
 
     private static final int TAB_KITCHEN = 0;
     private static final int TAB_ORDERS = 1;
@@ -71,7 +70,6 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
     private Net.Server server;
     private Net.DiscoveryResponder responder;
-    private final FrpcRunner frpc = new FrpcRunner();
     private volatile int listenPort;
     private int wantedPort = Net.DEFAULT_PORT;
 
@@ -79,7 +77,6 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
     private TextView statusText;
     private TextView addrText;
     private TextView toggleBtn;
-    private TextView engineText;
     private TextView connectHint;
     private TextView tsText;
     private TextView relayText;
@@ -114,6 +111,8 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         this.notice = Social.parseNotice(sp.getString("notice", ""));
         chatLog.addAll(Social.parseMsgs(sp.getString("chat", "[]"), false));
         orders.addAll(loadOrders());
+        // 恢复本地保存的菜谱（否则每次启动都退回内置默认菜单）
+        restoreMenu();
         setOrientation(VERTICAL);
         setBackgroundColor(Theme.adapt(Ui.BG));
 
@@ -135,6 +134,39 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
         // 使用中周期性检查 GitHub 更新（静默，偶尔试一次）
         // 周期自动检查已关闭：更新只在用户点「检查更新」时进行
+    }
+
+    /**
+     * 把当前菜谱写回本地。
+     *
+     * 接单端以前**完全不存菜谱** —— 猫猫推过来的菜谱只在内存里，
+     * App 一重启就退回内置默认菜单，用户会以为"菜谱没同步成功"。
+     * 现在和点单端用同一套键（menu / menu_fp），两边各自持有一份。
+     */
+    private void saveMenu() {
+        try {
+            sp.edit().putString("menu", Menu.toJson())
+                    .putString("menu_fp", Menu.fingerprint()).apply();
+        } catch (Exception ignore) {
+        }
+    }
+
+    /**
+     * 启动时恢复本地菜谱。
+     *
+     * 判定方式和点单端一致：内置菜单指纹变了（发新版）才重新合并。
+     */
+    private void restoreMenu() {
+        try {
+            String saved = sp.getString("menu", "");
+            if (saved == null || saved.length() == 0) {
+                return;
+            }
+            if (!Menu.fingerprint().equals(sp.getString("menu_fp", ""))) {
+                Menu.applyJson(saved, true);
+            }
+        } catch (Exception ignore) {
+        }
     }
 
     private int dp(float v) {
@@ -426,31 +458,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         });
 
         updateStatus(server != null && server.isRunning(), listenPort);
-        checkEngine();
         return card;
-    }
-
-    private void checkEngine() {
-        new Thread(new Runnable() {
-            public void run() {
-                final String v = FrpcRunner.runVersion(act);
-                final boolean ok = v.startsWith("0.51");
-                act.runOnUiThread(new Runnable() {
-                    public void run() {
-                        if (engineText == null) {
-                            return;
-                        }
-                        if (ok) {
-                            engineText.setText("穿透引擎 frpc " + v.split("\\s+")[0] + " 已就绪（内置）");
-                            engineText.setTextColor(Theme.adapt(0xFF2E9E6B));
-                        } else {
-                            engineText.setText("穿透引擎异常：" + v);
-                            engineText.setTextColor(Theme.adapt(0xFFD2453F));
-                        }
-                    }
-                });
-            }
-        }).start();
     }
 
     private void copyAddr() {
@@ -661,7 +669,18 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         card.addView(row("接单端口", (listenPort == 0 ? "未启动" : String.valueOf(listenPort))));
         card.addView(row("本机地址", Net.localIpv4()));
         card.addView(row("局域网发现", listenPort == 0 ? "未启动" : "UDP 8766 监听中"));
-        card.addView(row("穿透进程", frpc.isRunning() ? "运行中" : "未启动"));
+        // 原来这里是「穿透进程」（frpc）。frpc 已整体移除，
+        // 换成对用户真正有意义的「交换状态」：中转有没有在线。
+        String relayRoom = com.couple.xiaowo.core.Relay.room(act);
+        String relayText;
+        if (relayRoom == null) {
+            relayText = "未配对";
+        } else if (com.couple.xiaowo.core.Relay.enabled(act)) {
+            relayText = "已配对 · 房间 " + relayRoom;
+        } else {
+            relayText = "已关闭";
+        }
+        card.addView(row("异地通道", relayText));
         card.addView(row("已收订单", orders.size() + " 单"));
         content.addView(card);
 
@@ -1101,7 +1120,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
      *   2) **最近一单的 replyHost/replyPort** —— 这一条以前漏了，
      *      结果是：接单端如果没跑过「拉菜谱」，peer_host 就是空的，
      *      点「看猫猫的屏幕」直接什么都不发，用户只看到"没反应"。
-     *      而订单里天然带着点单端的回信地址，异地也指向中转/穿透地址。
+     *      而订单里天然带着点单端的回信地址，异地也指向中转地址。
      *   3) 中转（点单端收到 TYPE_SHOT 后自己截、自己回传）
      */
     private void requestShot() {
@@ -1417,6 +1436,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
                         String fpBefore = Menu.fingerprint();
                         Menu.applyJson(body, true);
                         boolean changed = !Menu.fingerprint().equals(fpBefore);
+                        saveMenu();
                         if (menuStamp != null) {
                             menuStamp.setText(Menu.totalCount() + " 道 · " + nowHm());
                         }
@@ -1730,6 +1750,17 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         final int port;
         Net.Server s = new Net.Server(new Net.BlobHandler() {
             public Object handle(String method, String path, String body) {
+                /*
+                 * 界面已经销毁就别再处理了。
+                 *
+                 * Server 是后台线程，长连接可能比 Activity 活得久一点
+                 * （shutdown 里会 stop，但已 accept 的连接会走完当前请求）。
+                 * 这时再 runOnUiThread 去动已经 destroy 的界面没有意义，
+                 * 也容易踩到空 View。
+                 */
+                if (act.isFinishing() || (Build.VERSION.SDK_INT >= 17 && act.isDestroyed())) {
+                    return Protocol.ack(false, Protocol.ROLE_RECV, "bye");
+                }
                 // ---- 直连推更新：把内置的点单端 APK 给对方 ----
                 if (ApkRelay.PATH_INFO.equals(path)) {
                     ApkRelay.Info info = ApkRelay.bundledInfo(act);
@@ -1799,6 +1830,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
                             int before = Menu.totalCount();
                             String fpBefore = Menu.fingerprint();
                             Menu.applyJson(body, true);
+                            saveMenu();
                             if (menuStamp != null) {
                                 menuStamp.setText("菜谱：" + Menu.totalCount() + " 道 · " + nowHm());
                             }
@@ -1871,24 +1903,6 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         responder.start();
         updateStatus(true, port);
     }
-
-    public int localPort() {
-        return listenPort;
-    }
-
-    public boolean rebindTo(int port) {
-        if (port <= 0 || port > 65535) {
-            return false;
-        }
-        if (port == listenPort) {
-            return true;
-        }
-        stopListening();
-        wantedPort = port;
-        startListening(port);
-        return listenPort == port;
-    }
-
     /**
      * 处理中转消息 —— 由 MainActivity 统一派发进来。
      *
@@ -2177,7 +2191,6 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
     public void shutdown() {
         GitHubCard.stopPeriodic();
-        frpc.stop();
         stopListening();
     }
 }

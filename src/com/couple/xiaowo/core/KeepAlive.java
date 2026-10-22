@@ -168,7 +168,7 @@ public final class KeepAlive extends Service {
         return nb.build();
     }
 
-    /** 更新常驻通知上的文字（比如显示穿透地址、已收单数） */
+    /** 更新常驻通知上的文字（比如已收单数） */
     public static void update(Context c, String role, String hint) {
         try {
             NotificationManager m = (NotificationManager) c.getSystemService(NOTIFICATION_SERVICE);

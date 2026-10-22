@@ -109,6 +109,14 @@ public final class Menu {
 
     public static final List<Category> CATEGORIES = new ArrayList<Category>();
 
+    /**
+     * 内置默认菜单的规格快照（static 块里填充，之后只读）。
+     *
+     * 存在的理由：升级后用旧版本保存的菜单替换时，要能查回"这道菜原本有哪些规格"。
+     * 因为替换会把 CATEGORIES 变成旧数据，那时就读不到内置规格了。
+     */
+    private static final List<Category> BUILTIN = new ArrayList<Category>();
+
     private static void add(Category c, String name, int price, int cat, String emoji, String desc) {
         c.items.add(new Item(name, price, cat, emoji, desc, 5.0f, 0));
     }
@@ -182,6 +190,18 @@ public final class Menu {
         add(money, "清空购物车", 50, 0, "🛒", "这个有点过分",
                 "全部", "只清一件", "先看看", "等我想想");
         CATEGORIES.add(money);
+
+        // 记录内置菜单的规格快照：升级后用旧数据替换时，靠它把规格补回来
+        for (Category c : CATEGORIES) {
+            Category copy = new Category(c.name, c.icon);
+            for (Item it : c.items) {
+                Item ci = new Item(it.name, it.price, it.cat, it.emoji, it.desc,
+                        it.rating, it.monthly, false);
+                ci.specs.addAll(it.specs);
+                copy.items.add(ci);
+            }
+            BUILTIN.add(copy);
+        }
     }
 
     // ================================================================== 菜谱同步
@@ -222,6 +242,28 @@ public final class Menu {
                 fresh.add(c);
             }
         }
+        /*
+         * 补齐规格（升级兼容）。
+         *
+         * 老版本存下来的菜单 JSON 里没有 specs 字段。如果直接用它替换，
+         * 发新版内置的规格会全部消失 —— 用户升级后看到的就是
+         * "怎么还是没有选规格的按钮"（不是功能没做，是被旧数据盖掉了）。
+         *
+         * 做法：拿内置默认菜单当"规格字典"，同名菜把规格补回去。
+         * 用户自己改过的规格优先保留（非空就不动）。
+         */
+        for (Category c : fresh) {
+            for (Item it : c.items) {
+                if (it.specs.size() > 0) {
+                    continue;
+                }
+                List<String> builtin = builtinSpecsOf(it.name);
+                if (builtin != null) {
+                    it.specs.addAll(builtin);
+                }
+            }
+        }
+
         if (replaceAll) {
             List<Category> keep = new ArrayList<Category>();
             for (Category c : CATEGORIES) {
@@ -242,7 +284,28 @@ public final class Menu {
                 for (Category c : CATEGORIES) {
                     if (c.name.equals(k.name)) {
                         for (Item it : k.items) {
-                            if (it.custom) {
+                            if (!it.custom) {
+                                continue;
+                            }
+                            /*
+                             * 去重：同名自定义菜若已经存在，就不再追加。
+                             *
+                             * 原来这里是无条件 c.items.add(it) —— 而 keep 来自
+                             * 上一轮的 CATEGORIES，它本身可能已经含有一份同名
+                             * 自定义菜。多同步几次就会堆出好几份重复项，
+                             * 菜单里出现"要摸摸头"×3 这种。
+                             *
+                             * 补一条：如果新菜单里也有同名（用户可能改名后又撞名），
+                             * 就用新传过来的那份为准，不保留旧的。
+                             */
+                            boolean exists = false;
+                            for (Item old : c.items) {
+                                if (old.name.equals(it.name)) {
+                                    exists = true;
+                                    break;
+                                }
+                            }
+                            if (!exists) {
                                 c.items.add(it);
                             }
                         }
@@ -254,6 +317,26 @@ public final class Menu {
                 }
             }
         }
+    }
+
+    /**
+     * 内置默认菜单里同名菜的规格（升级兼容用）。
+     *
+     * 注意：必须读**静态快照**而不是 CATEGORIES —— applyJson 里
+     * CATEGORIES 可能已经被 fresh 替换掉了，那时再读就没有内置数据了。
+     */
+    public static List<String> builtinSpecsOf(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Category c : BUILTIN) {
+            for (Item it : c.items) {
+                if (it.name.equals(name) && it.specs.size() > 0) {
+                    return new ArrayList<String>(it.specs);
+                }
+            }
+        }
+        return null;
     }
 
     /** 对照用：菜单指纹，变了才需要同步 */

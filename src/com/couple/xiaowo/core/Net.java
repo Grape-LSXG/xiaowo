@@ -115,7 +115,7 @@ public final class Net {
 
     /**
      * Tailscale 用 100.64.0.0/10 这段 CGNAT 地址（100.64.x.x ~ 100.127.x.x），
-     * 判断它同时也是「异地穿透该填哪个地址」的判据。
+     * 判断它同时也是「异地该填哪个地址」的判据。
      */
     public static boolean isTailscaleIp(String ip) {
         if (ip == null || !ip.startsWith("100.")) {
@@ -295,11 +295,11 @@ public final class Net {
     /**
      * 把 host 解析成「协议 + 纯主机名」。
      *
-     * 为什么需要它：SakuraFrp 因合规要求**拦截明文 HTTP**，
+     * 为什么需要它：某些穿透服务因合规要求**拦截明文 HTTP**，
      * 公网访问必须走 HTTPS。所以 host 字段允许携带协议前缀：
      *   "frp-cat.com"            → http + frp-cat.com
      *   "https://frp-cat.com"    → https + frp-cat.com
-     *   "https://abc.natfrp.cloud" → https + abc.natfrp.cloud
+     *   "https://abc.example.com" → https + abc.example.com
      *
      * 这样局域网老配置完全不受影响，公网填带 https:// 的地址即可。
      */
@@ -344,7 +344,7 @@ public final class Net {
     /**
      * HTTPS 宽容模式。
      *
-     * 为什么需要：SakuraFrp 的「自动 HTTPS」用的是它平台的证书，
+     * 为什么需要：部分穿透服务默认用自签/平台证书，
      * 而 App 默认的信任库不认识，会抛 SSLHandshakeException。
      * 这里对该域名放宽校验——注意：**只放宽证书校验，不改协议、不降级明文**，
      * 而且仅对用户显式填写 https:// 的目标生效。
@@ -500,7 +500,7 @@ public final class Net {
 
     /**
      * 二进制响应。用于把 APK 这类文件直接通过直连通道吐给对方，
-     * 不经过任何第三方存储 —— 这就是「用内网穿透推新版本」的地基。
+     * 不经过任何第三方存储 —— 这就是「局域网直连推新版本」的地基。
      */
     public static final class Blob {
         public final byte[] data;

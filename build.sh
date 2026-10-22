@@ -142,18 +142,10 @@ PYEOF
   # ---- dex 塞进 APK（aapt add 用相对路径）----
   ( cd "$wd/dex" && aapt add "$wd/base.apk" classes.dex >/dev/null )
 
-  # ---- 接单端：把官方 frpc（arm64）打进 lib/arm64-v8a/ ----
-  #   Android 只允许执行 nativeLibraryDir 里的文件，所以必须放在这里，
-  #   并且清单里要开 extractNativeLibs=true 让它被解压出来。
-  if [ "$role" = "recv" ]; then
-    if [ ! -f "$ROOT/tools/prebuilt/frpc_arm64" ]; then
-      red "缺少 tools/prebuilt/frpc_arm64（官方 frpc 0.51.0-sakura-14 arm64）"
-      exit 1
-    fi
-    mkdir -p "$wd/libs/lib/arm64-v8a"
-    cp "$ROOT/tools/prebuilt/frpc_arm64" "$wd/libs/lib/arm64-v8a/libfrpc.so"
-    ( cd "$wd/libs" && aapt add "$wd/base.apk" lib/arm64-v8a/libfrpc.so >/dev/null )
-  fi
+  # 原来这里会把官方 frpc（arm64，4.6MB）打进 lib/arm64-v8a/。
+  # 已经移除：SakuraFrp 穿透在 App 里没有任何入口（TunnelPanel 从未被弹出），
+  # 留着它只让接单端 APK 白胖 4.6MB（6.1MB 里占 76%）。
+  # 异地方案现在走 MQTT 中转 / Tailscale，不需要这个二进制。
 
   # ---- 对齐 + 签名 ----
   zipalign -f -p 4 "$wd/base.apk" "$wd/aligned.apk"

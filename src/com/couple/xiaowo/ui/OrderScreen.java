@@ -626,7 +626,7 @@ public class OrderScreen extends LinearLayout {
                             sp.edit().putString("peer_host", host).putInt("peer_port", port).apply();
                             Net.setRelaxTls(secure);
                             if (secure) {
-                                toast("已启用 HTTPS（穿透模式）");
+                                toast("已启用加密连接");
                             }
                         }
                         if (peerView != null) {
@@ -929,8 +929,8 @@ public class OrderScreen extends LinearLayout {
         if (fridge.isEmpty()) {
             content.addView(emptyState("🧊", "冰箱是空的", "在厨房里长按一道菜，就能囤进冰箱"));
         } else {
-            for (final String name : new ArrayList<String>(fridge)) {
-                content.addView(buildFridgeRow(name), rowLp());
+            for (final String key : new ArrayList<String>(fridge)) {
+                content.addView(buildFridgeRow(key), rowLp());
             }
             LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -939,18 +939,17 @@ public class OrderScreen extends LinearLayout {
             all.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     cart.clear();
-                    for (String n : fridge) {
-                        Menu.Item fi = byName.get(n);
-                        if (fi == null) {
+                    for (String key : fridge) {
+                        /*
+                         * 冰箱里存的就是完整的 CartKey（菜名+规格），
+                         * 直接用，不再猜规格 —— 囤的是什么就点什么。
+                         */
+                        String n = com.couple.xiaowo.core.CartKey.nameOf(key);
+                        if (byName.get(n) == null) {
                             continue;
                         }
-                        /*
-                         * 有规格的菜不能直接塞进购物车 —— 那样等于"没选规格"。
-                         * 这里取它的第一个规格作为默认值，
-                         * 并在提示里说明可以再点「+」换别的规格。
-                         */
-                        String sp = fi.hasSpecs() ? fi.specs.get(0) : "";
-                        cart.put(com.couple.xiaowo.core.CartKey.of(n, sp), 1);
+                        Integer prev = cart.get(key);
+                        cart.put(key, prev == null ? 1 : prev + 1);
                     }
                     for (String k : new ArrayList<String>(actionBoxes.keySet())) {
                         refreshActions(k);
@@ -981,7 +980,9 @@ public class OrderScreen extends LinearLayout {
         page.addView(add, addLp);
         return page;
     }
-    private View buildFridgeRow(final String name) {
+    private View buildFridgeRow(final String key) {
+        final String name = com.couple.xiaowo.core.CartKey.nameOf(key);
+        final String spec = com.couple.xiaowo.core.CartKey.specOf(key);
         Menu.Item it = byName.get(name);
         if (it == null) {
             return new View(act);
@@ -1006,7 +1007,9 @@ public class OrderScreen extends LinearLayout {
         tLp.weight = 1f;
         tLp.leftMargin = dp(10);
         texts.setLayoutParams(tLp);
-        texts.addView(Ui.tv(act, it.name, 14, Ui.TEXT, true));
+        // 有规格的显示成「要亲亲 · 脸颊」，冰箱里两种规格是两条独立记录
+        texts.addView(Ui.tv(act, spec.length() == 0 ? it.name : it.name + " · " + spec,
+                14, Ui.TEXT, true));
         texts.addView(Ui.tv(act, it.desc + " · ❤" + it.price, 10.5f, Ui.SUB, false));
         card.addView(texts);
 
@@ -1015,7 +1018,7 @@ public class OrderScreen extends LinearLayout {
         del.setBackground(Ui.round(0xFFFDECEC, dp(999)));
         del.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
-                fridge.remove(name);
+                fridge.remove(key);
                 saveFridge();
                 switchTab(TAB_FRIDGE);
                 toast("已从冰箱取出");
@@ -1199,13 +1202,24 @@ public class OrderScreen extends LinearLayout {
 
         row.setOnLongClickListener(new OnLongClickListener() {
             public boolean onLongClick(View v) {
-                if (fridge.contains(it.name)) {
-                    toast("这道菜已经在冰箱里了");
-                } else {
-                    fridge.add(it.name);
-                    saveFridge();
-                    toast("已把「" + it.name + "」存进冰箱 🧊");
+                /*
+                 * 冰箱键也用「菜名 + 规格」。
+                 *
+                 * 原来只存菜名，带规格的菜进冰箱后规格就丢了，
+                 * 之后「全部点一份」只能瞎猜一个（原来猜的是第一个），
+                 * 用户囤的是"奶茶·三分糖"，下单却变成"奶茶·全糖"。
+                 */
+                if (!it.hasSpecs()) {
+                    if (fridge.contains(it.name)) {
+                        toast("这道菜已经在冰箱里了");
+                    } else {
+                        fridge.add(it.name);
+                        saveFridge();
+                        toast("已把「" + it.name + "」存进冰箱 🧊");
+                    }
+                    return true;
                 }
+                showFridgeSpecPicker(it);
                 return true;
             }
         });
@@ -1499,7 +1513,10 @@ public class OrderScreen extends LinearLayout {
         for (Protocol.Line l : e.lines) {
             LinearLayout row = Ui.horizontal(act);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.addView(Ui.tv(act, (l.emoji == null || l.emoji.length() == 0 ? "🐾" : l.emoji) + " " + l.name,
+            // displayName() 会把规格带上（要亲亲·脸颊），
+            // 否则历史里两种规格看起来一模一样，分不清当初点的是哪个
+            row.addView(Ui.tv(act, (l.emoji == null || l.emoji.length() == 0 ? "🐾" : l.emoji)
+                            + " " + l.displayName(),
                     12.5f, Ui.TEXT, false), new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(Ui.tv(act, "×" + l.qty + "  ❤" + (l.price * l.qty), 11.5f, Ui.SUB, false));
@@ -1619,6 +1636,22 @@ public class OrderScreen extends LinearLayout {
     private void loadStore() {
         history = History.parse(sp.getString("order_history", "[]"));
         fridge = History.fridgeFrom(sp.getString("fridge", "[]"));
+        /*
+         * 聊天记录和公告也必须恢复。
+         *
+         * 原来这两项只在内存里：Activity 一旦重建（切深色、从授权页返回、
+         * 系统因内存紧张回收）就全没了，而且下次 saveChat 会把空列表写回磁盘 ——
+         * 等于**永久丢失**。这是用户会直接看到的问题。
+         */
+        try {
+            chatLog.clear();
+            chatLog.addAll(Social.parseMsgs(sp.getString("chat", "[]"), false));
+        } catch (Exception ignore) {
+        }
+        try {
+            notice = Social.parseNotice(sp.getString("notice", ""));
+        } catch (Exception ignore) {
+        }
     }
     /**
      * 顶部的连接状态文案。
@@ -1712,7 +1745,7 @@ public class OrderScreen extends LinearLayout {
             TextView minus = tinyCircle("−", 0xFFF2EEFB, Ui.PURPLE_DEEP, 24, 15);
             minus.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
-                    addToCart(name, -1);
+                    minusFor(name);
                 }
             });
             box.addView(minus);
@@ -1758,6 +1791,83 @@ public class OrderScreen extends LinearLayout {
     }
 
     /**
+     * 点「−」：把这一份减掉。
+     *
+     * 关键：**必须按规格减**。
+     *
+     * 原来这里直接调 addToCart(name, -1)，而 addToCart 拼的是
+     * "菜名 + 空规格" 的 key —— 带规格的菜在购物车里根本没有那个 key，
+     * 所以 cart.get() 返回 null、q 变成 -1、然后 remove 一个不存在的键。
+     * 结果就是：带规格的菜点了减号**完全没反应**，份数一点不变。
+     *
+     * 现在的规则：
+     *   · 没规格的菜 → 直接减 1
+     *   · 只选了 1 种规格 → 直接减那一种（不用问，没有歧义）
+     *   · 选了 2 种以上规格 → 弹窗让用户选减哪一个
+     */
+    private void minusFor(String name) {
+        Menu.Item it = byName.get(name);
+        if (it == null) {
+            return;
+        }
+        java.util.List<String> usedSpecs = new java.util.ArrayList<String>();
+        for (Map.Entry<String, Integer> e : cart.entrySet()) {
+            if (e.getValue() <= 0) {
+                continue;
+            }
+            if (com.couple.xiaowo.core.CartKey.nameOf(e.getKey()).equals(name)) {
+                usedSpecs.add(com.couple.xiaowo.core.CartKey.specOf(e.getKey()));
+            }
+        }
+        if (usedSpecs.isEmpty()) {
+            return;
+        }
+        if (usedSpecs.size() == 1) {
+            // 只有一种，直接减，不用打扰用户
+            addToCartSpec(name, usedSpecs.get(0), -1);
+            return;
+        }
+        // 多种规格：让用户明确选减哪个
+        showSpecPickerForRemove(it, usedSpecs);
+    }
+
+    /**
+     * 减规格弹窗：列出**购物车里实际有的**规格及其份数。
+     *
+     * 和加规格的弹窗分开，因为这里要显示份数，且只列已在购物车里的规格
+     * （点一个没买的规格去"减"是没有意义的）。
+     */
+    private void showSpecPickerForRemove(final Menu.Item it,
+                                         java.util.List<String> usedSpecs) {
+        LinearLayout box = Ui.vertical(act);
+        box.setPadding(dp(6), dp(4), dp(6), dp(4));
+        box.addView(Ui.tv(act, "要减掉哪一个" + it.name + "？", 12.5f, Ui.TEXT, true));
+
+        final Dialog[] dlgRef = new Dialog[1];
+        for (final String sp : usedSpecs) {
+            String key = com.couple.xiaowo.core.CartKey.of(it.name, sp);
+            int q = cart.containsKey(key) ? cart.get(key) : 0;
+            if (q <= 0) {
+                continue;
+            }
+            String label = (sp.length() == 0 ? "不选规格" : sp) + "　×" + q;
+            TextView row = Ui.pill(act, label, 0xFFF7F5FA, Ui.TEXT, 12.5f, 14, 10, false);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    addToCartSpec(it.name, sp, -1);
+                    Dialog d = dlgRef[0];
+                    if (d != null) {
+                        d.dismiss();
+                    }
+                }
+            });
+            box.addView(row, top(6));
+        }
+        dlgRef[0] = DialogKit.custom(act, "减掉一份", box, "取消", null);
+    }
+
+    /**
      * 规格选择弹窗。
      *
      * @param defaultSpec 预选中的规格（null 表示不预选）
@@ -1789,6 +1899,44 @@ public class OrderScreen extends LinearLayout {
         }
         dlgRef[0] = DialogKit.custom(act, "选规格", box, "取消", null);
     }
+    /**
+     * 长按入冰箱时，让用户选一个规格囤起来。
+     *
+     * 之所以要选：冰箱是"下次直接点"的快捷方式，
+     * 囤一个模糊的菜名没有意义 —— 下次还是得重新选规格。
+     */
+    private void showFridgeSpecPicker(final Menu.Item it) {
+        LinearLayout box = Ui.vertical(act);
+        box.setPadding(dp(6), dp(4), dp(6), dp(4));
+        box.addView(Ui.tv(act, "囤哪个规格的" + it.name + "？", 12.5f, Ui.TEXT, true));
+
+        final Dialog[] dlgRef = new Dialog[1];
+        for (final String sp : it.specs) {
+            final String key = com.couple.xiaowo.core.CartKey.of(it.name, sp);
+            boolean already = fridge.contains(key);
+            TextView row = Ui.pill(act, sp + (already ? "（已在冰箱）" : ""),
+                    0xFFF7F5FA, Ui.TEXT, 12.5f, 14, 10, false);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    if (fridge.contains(key)) {
+                        toast("这个规格已经在冰箱里了");
+                    } else {
+                        fridge.add(key);
+                        saveFridge();
+                        toastOk("已把「" + it.name + " · " + sp + "」存进冰箱 🧊");
+                    }
+                    Dialog d = dlgRef[0];
+                    if (d != null) {
+                        d.dismiss();
+                    }
+                }
+            });
+            box.addView(row, top(6));
+        }
+        dlgRef[0] = DialogKit.custom(act, "存进冰箱", box, "取消", null);
+    }
+
     private void reorder(History.Entry e) {
         cart.clear();
         for (Protocol.Line l : e.lines) {
@@ -1901,10 +2049,19 @@ public class OrderScreen extends LinearLayout {
         }).start();
     }
     private void showFridgePicker() {
+        /*
+         * 只列**没有规格**的菜。
+         *
+         * 有规格的菜需要先确定囤哪个规格，这个多选列表表达不了
+         * （同一个菜要出现多行、每行一个规格），所以走厨房里长按那道菜的方式。
+         * 这样也不会出现"勾了个菜名但不知道囤的是哪个规格"。
+         */
         final List<String> names = new ArrayList<String>();
         for (Menu.Category c : Menu.CATEGORIES) {
             for (Menu.Item it : c.items) {
-                names.add(it.name);
+                if (!it.hasSpecs()) {
+                    names.add(it.name);
+                }
             }
         }
         final String[] arr = names.toArray(new String[0]);
@@ -2018,8 +2175,16 @@ public class OrderScreen extends LinearLayout {
             return;
         }
         String fp = sp.getString("menu_fp", "");
+        /*
+         * 注意这里比较的方向：拿**当前（内置默认）菜单的指纹**去比**保存的指纹**。
+         *
+         * 内置菜谱变了（发新版加了菜/规格）时两者不等，就应用保存的菜单 + 合并。
+         * 但应用之后**必须把新指纹写回**，否则下次启动仍然"不等"，
+         * 于是又合并一次 —— 自定义菜会被重复叠加，越开越多。
+         */
         if (!Menu.fingerprint().equals(fp)) {
             Menu.applyJson(saved, true);
+            saveMenuToDisk();
         }
     }
 
@@ -2471,6 +2636,10 @@ public class OrderScreen extends LinearLayout {
         }
         Net.Server s = new Net.Server(new Net.Handler() {
             public String handle(String method, String path, String body) {
+                // 界面已销毁就不再处理（理由同 RecvScreen）
+                if (act.isFinishing() || (Build.VERSION.SDK_INT >= 17 && act.isDestroyed())) {
+                    return Protocol.ack(false, Protocol.ROLE_ORDER, "bye");
+                }
                 // 接单端来拉菜谱：GET /menu?pull=1
                 if (Protocol.PATH_MENU.equals(path) && "GET".equalsIgnoreCase(method)) {
                     saveMenuToDisk();
@@ -2540,6 +2709,7 @@ public class OrderScreen extends LinearLayout {
                     act.runOnUiThread(new Runnable() {
                         public void run() {
                             Menu.applyJson(body, true);
+                            saveMenuToDisk();
                             byName.clear();
                             for (Menu.Category c : Menu.CATEGORIES) {
                                 for (Menu.Item it : c.items) {

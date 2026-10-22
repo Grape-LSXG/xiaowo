@@ -20,7 +20,7 @@ import java.net.URL;
  *        GET /apk/order  直接把内置的点单端 APK 二进制吐出来
  *   3. 点单端每次打开时向接单端要 /apk/info，比自己新就下载并调安装器
  *
- * 全程走你们自己的局域网 / SakuraFrp 通道，没有第三方。
+ * 全程走你们自己的局域网或中转房间，没有第三方存储。
  */
 public final class ApkRelay {
 
