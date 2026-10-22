@@ -81,13 +81,8 @@ public final class PermissionGate {
         }
     };
 
-    /**
-     * vivo 专属引导：锁屏显示 + 后台弹出界面 + 自启动。
-     *
-     * 这三项在 vivo（OriginOS/FuntouchOS）上属于「权限管理 → 其他权限」
-     * 和「电池 → 后台耗电管理」体系，没有统一的系统 Intent 能一键打开，
-     * 所以跳 App 详情页，让用户在那个页面里逐项开（很多条目也在同一页）。
-     */
+    /** vivo 专属引导：锁屏显示 + 后台弹出界面 + 自启动 + 后台高耗电。
+     * 这些没有统一公开 Intent 能一键开，所以打开手机管家让用户逐项开。 */
     private static final Missing VIVO_AUTOSTART = new Missing() {
         @Override
         public String title() {
@@ -106,7 +101,6 @@ public final class PermissionGate {
 
         @Override
         public boolean go(Activity act) {
-            // 优先打开 vivo/iQOO 手机管家（i管家），自启动/后台管理入口都集中在那
             try {
                 Intent i = act.getPackageManager()
                         .getLaunchIntentForPackage("com.iqoo.secure");
@@ -121,7 +115,6 @@ public final class PermissionGate {
                 }
             } catch (Exception ignore) {
             }
-            // 找不到 i管家，退回 App 详情页
             try {
                 Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.parse("package:" + act.getPackageName()));
@@ -134,6 +127,9 @@ public final class PermissionGate {
         }
     };
 
+    /** 当前正在显示的阻断弹窗 —— 用来防重复弹（onCreate + onResume 都调 ensure 时去重） */
+    private static Dialog blockingDialog;
+
     private PermissionGate() {
     }
 
@@ -145,34 +141,50 @@ public final class PermissionGate {
         if (!Updater.canInstall(act)) {
             return INSTALL;
         }
-        /*
-         * 通知权限单独提示（SystemNotify.request 会弹系统框），
-         * 这里不重复；但 vivo 的锁屏显示 / 后台弹出 / 自启动
-         * 没有可编程检测的手段，只在首次进入时引导一次。
-         */
         return null;
     }
 
-    /** 检查；全部就绪返回 true，否则弹不可取消引导并返回 false */
+    /**
+     * 每次打开都检查；发现缺权限才弹不可取消的引导并返回 false。
+     *
+     * 关键：如果已经有一个阻断弹窗在显示，就不再弹第二个，
+     * 避免 onCreate → onResume 连续调用时两个框叠加。
+     */
     public static boolean ensure(final Activity act) {
+        // 已有阻断弹窗在显示，直接视为"还未通过"，不再叠加
+        if (blockingDialog != null && blockingDialog.isShowing()) {
+            return false;
+        }
         final Missing m = firstMissing(act);
         if (m == null) {
-            // 硬权限都齐了，再引导一次 vivo 后台设置（只引导一次）
+            /*
+             * 硬权限都齐了。vivo 的锁屏显示/自启动/后台弹窗没有可编程检测
+             * 手段，只能引导一次（不是每次弹），否则成了骚扰。
+             */
             if (shouldShowVivoGuide(act)) {
                 showVivoGuide(act);
                 return false;
             }
             return true;
         }
-        Dialog dlg = DialogKit.customBlocking(act, m.title(), m.desc(),
+        blockingDialog = DialogKit.customBlocking(act, m.title(), m.desc(),
                 "去开启", new Runnable() {
                     public void run() {
+                        blockingDialog = null;
                         m.go(act);
                     }
                 });
-        if (dlg == null) {
+        if (blockingDialog == null) {
             // 极端情况：对话框都弹不出来，直接自己跳
             m.go(act);
+        } else {
+            blockingDialog.setOnDismissListener(
+                    new android.content.DialogInterface.OnDismissListener() {
+                        @Override
+                        public void onDismiss(android.content.DialogInterface d) {
+                            blockingDialog = null;
+                        }
+                    });
         }
         return false;
     }
@@ -184,23 +196,26 @@ public final class PermissionGate {
     }
 
     private static void showVivoGuide(final Activity act) {
-        Dialog dlg = DialogKit.customBlocking(act, VIVO_AUTOSTART.title(), VIVO_AUTOSTART.desc(),
-                "去设置", new Runnable() {
+        blockingDialog = DialogKit.customBlocking(act, VIVO_AUTOSTART.title(),
+                VIVO_AUTOSTART.desc(), "去设置", new Runnable() {
                     public void run() {
+                        blockingDialog = null;
                         VIVO_AUTOSTART.go(act);
                         act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE)
                                 .edit().putBoolean("vivo_guide_shown", true).apply();
                     }
                 });
-        // 加了 onKeyListener 锁返回键；用户如果强行返回不走按钮，也算引导过
-        if (dlg != null) {
-            dlg.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
-                @Override
-                public void onDismiss(android.content.DialogInterface d) {
-                    act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE)
-                            .edit().putBoolean("vivo_guide_shown", true).apply();
-                }
-            });
+        // 无论怎么关的框，都标记已引导过，下次不再弹
+        if (blockingDialog != null) {
+            blockingDialog.setOnDismissListener(
+                    new android.content.DialogInterface.OnDismissListener() {
+                        @Override
+                        public void onDismiss(android.content.DialogInterface d) {
+                            act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE)
+                                    .edit().putBoolean("vivo_guide_shown", true).apply();
+                            blockingDialog = null;
+                        }
+                    });
         }
     }
 }
