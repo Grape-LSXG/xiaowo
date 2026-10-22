@@ -1057,30 +1057,50 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
     }
 
     /** 让点单端震动。level: 0 轻 / 1 中 / 2 重 */
+    /**
+     * 「叫一下猫猫」—— 让点单端震动。
+     *
+     * 原来只走直连（Net.post 到 peer_host），异地时必然失败，
+     * 表现就是"震动功能不可用"。现在和订单一样按优先级试：
+     *   直连 → 中转
+     */
     private void buzzCat(int level) {
         final int ms = level == 0 ? 200 : (level == 1 ? 600 : 1500);
         final String[] reasons = {
                 "轻轻碰了你一下", "张老师叫你", "张老师急着找你！！"
         };
+        final String buzzBody = Protocol.buzz(reasons[level], ms, Protocol.NAME_RECV);
         final String catHost = sp.getString("peer_host", null);
-        int port = sp.getInt("peer_port", 0);
-        final int fport = port;
-        if (catHost == null || fport <= 0) {
-            toastWarn("还不知道猫猫的地址，先等她下一单或发条消息");
+        final int port = sp.getInt("peer_port", 0);
+
+        boolean canDirect = catHost != null && port > 0;
+        boolean canRelay = com.couple.xiaowo.core.Relay.enabled(act);
+        if (!canDirect && !canRelay) {
+            toastWarn("还没配对 —— 去「连接方式」里配一次，以后就能震她了");
             return;
         }
+
         toast("正在震猫猫…");
         new Thread(new Runnable() {
             public void run() {
-                final boolean ok = Protocol.isOk(Net.post(catHost, fport, Protocol.PATH_BUZZ,
-                        Protocol.buzz(reasons[level], ms, Protocol.NAME_RECV), 3000));
+                boolean ok = false;
+                if (catHost != null && port > 0) {
+                    ok = Protocol.isOk(Net.post(catHost, port, Protocol.PATH_BUZZ,
+                            buzzBody, 3000));
+                }
+                // 直连不通就试中转（异地的主要通路）
+                if (!ok && com.couple.xiaowo.core.Relay.enabled(act)) {
+                    ok = com.couple.xiaowo.core.Relay.publish(act,
+                            Protocol.ROLE_RECV, buzzBody, 8000);
+                }
+                final boolean fOk = ok;
                 act.runOnUiThread(new Runnable() {
                     public void run() {
-                        if (ok) {
+                        if (fOk) {
                             toastOk("震到了 💗");
                             host.burst(12);
                         } else {
-                            toastWarn("没送到，猫猫可能没开着 App");
+                            toastWarn("没送到 —— 猫猫可能没联网，或她把中转关了");
                         }
                     }
                 });
