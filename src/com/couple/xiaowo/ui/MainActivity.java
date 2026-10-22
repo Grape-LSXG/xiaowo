@@ -197,6 +197,14 @@ public class MainActivity extends Activity implements HeartHost {
         com.couple.xiaowo.core.Updater.ensureDefault(this);
         setupAmbient();
         startRelay();
+        /*
+         * 保活开着的话，把一像素窗口也恢复起来。
+         * 这个窗口是进程级的（不是 Activity 级的），但 App 被彻底杀掉重进时
+         * 需要重新立起来。已经有权限、已经在跑时 start() 是幂等的。
+         */
+        if (KeepAliveCard.aliveEnabled(this) && com.couple.xiaowo.core.PixelKeeper.canOverlay(this)) {
+            com.couple.xiaowo.core.PixelKeeper.start(this);
+        }
     }
 
     /**
