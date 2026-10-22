@@ -314,24 +314,55 @@ public final class DialogKit {
     }
 
     /**
-     * 不可取消的确认框：返回键 / 点外部都不能关闭。
+     * 不可取消的确认框：返回键 / 点外部都不能关闭，且**只有一个主按钮，没有取消键**。
      * 用于启动时的强制权限引导 —— 权限没配好就不让进主界面。
      */
     public static Dialog customBlocking(Activity act, String title, String bodyText,
                                         String okText, final Runnable onOk) {
-        Dialog dlg = custom(act, title, okOnlyView(act, bodyText), okText, new Runnable() {
-            @Override
-            public void run() {
-                if (onOk != null) {
-                    onOk.run();
-                }
-            }
-        });
+        // 用 custom 但把"取消"按钮去掉：直接走只有主按钮的构造
+        Dialog dlg = customSingle(act, title, okOnlyView(act, bodyText), okText,
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        if (onOk != null) {
+                            onOk.run();
+                        }
+                    }
+                });
         if (dlg != null) {
             dlg.setCancelable(false);
             dlg.setCanceledOnTouchOutside(false);
+            // 锁死返回键：权限没配好不能跳过
+            dlg.setOnKeyListener(new android.content.DialogInterface.OnKeyListener() {
+                @Override
+                public boolean onKey(android.content.DialogInterface d, int keyCode,
+                                     android.view.KeyEvent event) {
+                    return keyCode == android.view.KeyEvent.KEYCODE_BACK;
+                }
+            });
         }
         return dlg;
+    }
+
+    /** 只有单个主按钮的对话框（没有取消/关闭按钮），供阻断式场景用 */
+    public static Dialog customSingle(Activity act, String title, View content,
+                                      String okText, final Runnable onOk) {
+        if (act == null) {
+            return null;
+        }
+        Frame f = create(act, title);
+        if (content != null) {
+            int screenH = act.getResources().getDisplayMetrics().heightPixels;
+            MaxHeightScroll scroll = new MaxHeightScroll(act, (int) (screenH * 0.5f));
+            scroll.setVerticalScrollBarEnabled(false);
+            scroll.addView(content, new ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            f.body.addView(scroll, fullWidth());
+        }
+        String ok = isEmpty(okText) ? "知道了" : okText;
+        TextView primary = primaryAction(act, ok, f.dialog, onOk);
+        f.body.addView(primary, topMargin(act, 18));
+        return present(act, f, false);
     }
 
     private static View okOnlyView(Activity act, String bodyText) {
