@@ -196,24 +196,38 @@ public final class GithubRelease {
     }
 
     private static String getJson(String url) throws Exception {
-        HttpURLConnection conn = null;
-        try {
-            conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(15000);
-            conn.setRequestProperty("User-Agent", UA);
-            // GitHub 要求显式声明接受的 API 版本
-            conn.setRequestProperty("Accept", "application/vnd.github+json");
-            int code = conn.getResponseCode();
-            if (code != 200) {
-                throw new Exception("HTTP " + code);
-            }
-            return Net.readAll(conn.getInputStream());
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
+        // 网络不稳时多试几次（超时就重试，最多 3 次）
+        Exception last = null;
+        for (int i = 0; i < 3; i++) {
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection) new URL(url).openConnection();
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("User-Agent", UA);
+                // GitHub 要求显式声明接受的 API 版本
+                conn.setRequestProperty("Accept", "application/vnd.github+json");
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    throw new Exception("HTTP " + code);
+                }
+                return Net.readAll(conn.getInputStream());
+            } catch (Exception e) {
+                last = e;
+                // 短暂等待后重试，给网络一点恢复时间
+                try {
+                    Thread.sleep(800L * (i + 1));
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }
+        throw last != null ? last : new Exception("网络异常");
     }
 
     /**
