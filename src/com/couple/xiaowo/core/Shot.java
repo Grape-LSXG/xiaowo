@@ -35,12 +35,31 @@ import java.util.concurrent.TimeUnit;
 public final class Shot {
 
     /**
-     * 截出来的图上限：最长边 720px、JPEG 80%。
-     * 原来用这个值是为了塞进 MQTT 中转（公共 broker 对单包大小有限制）。
-     * 现在直连就够，但小图也传得快，保持。
+     * 画质参数。
+     *
+     * 原来是最长边 720px + JPEG 80%，那是在**为 MQTT 中转省体积**的年代定的
+     * （公共 broker 对单包有大小限制，中转发大图会丢）。
+     * 但实际使用时截图基本都走局域网直连，720px 把 1260px 宽的屏幕缩掉一半，
+     * 文字全是糊的 —— 用户反馈"截图太模糊"就是这个原因。
+     *
+     * 现在：
+     *   · 最长边 1600px —— 覆盖绝大多数手机整屏（1260~1440），基本不缩放
+     *   · JPEG 92% —— 文字边缘清晰，体积也只有几百 KB
+     *
+     * 体积参考：1260x2800 整屏 PNG 约 2~4MB，JPEG 92% 约 300~600KB，
+     * 局域网直连一秒内传完；中转路径仍走小的兜底（见 captureForRelay）。
      */
-    private static final int MAX_EDGE = 720;
-    private static final int JPEG_QUALITY = 80;
+    private static final int MAX_EDGE = 1600;
+    private static final int JPEG_QUALITY = 92;
+
+    /**
+     * 中转通道专用的画质上限。
+     *
+     * 公共 MQTT broker 对大包不友好（QoS0 会丢），所以走中转回传时
+     * 仍然压到 720px / 78%。直连走高清。
+     */
+    private static final int MAX_EDGE_RELAY = 720;
+    private static final int JPEG_QUALITY_RELAY = 78;
 
     /** 无障碍截屏的等待上限：系统回调通常几十毫秒，3 秒够宽松了 */
     private static final long A11Y_TIMEOUT_MS = 3000;
@@ -79,6 +98,24 @@ public final class Shot {
     /** 直接给 base64（用于塞进 JSON） */
     public static String captureBase64(Context c, View fallbackRoot) {
         byte[] jpg = capture(c, fallbackRoot);
+        if (jpg == null) {
+            return null;
+        }
+        return android.util.Base64.encodeToString(jpg, android.util.Base64.NO_WRAP);
+    }
+
+    /**
+     * 中转通道专用的低清 base64。
+     *
+     * 公共 MQTT broker 对大包不友好（QoS0 会直接丢），所以走中转回传时
+     * 仍按 720px / 78% 压；直连走高清。
+     */
+    public static String captureBase64ForRelay(Context c, View fallbackRoot) {
+        Bitmap bmp = captureBitmap(c, fallbackRoot);
+        if (bmp == null) {
+            return null;
+        }
+        byte[] jpg = toJpegForRelay(bmp);
         if (jpg == null) {
             return null;
         }
@@ -136,8 +173,18 @@ public final class Shot {
         }
     }
 
-    /** 缩放 + 压成 JPEG */
+    /** 缩放 + 压成 JPEG（默认高清） */
     public static byte[] toJpeg(Bitmap bmp) {
+        return toJpeg(bmp, MAX_EDGE, JPEG_QUALITY);
+    }
+
+    /** 中转通道用的低清版（体积优先） */
+    public static byte[] toJpegForRelay(Bitmap bmp) {
+        return toJpeg(bmp, MAX_EDGE_RELAY, JPEG_QUALITY_RELAY);
+    }
+
+    /** 缩放 + 压成 JPEG */
+    public static byte[] toJpeg(Bitmap bmp, int maxEdge, int quality) {
         if (bmp == null) {
             return null;
         }
@@ -146,8 +193,8 @@ public final class Shot {
             int w = bmp.getWidth();
             int h = bmp.getHeight();
             int max = Math.max(w, h);
-            if (max > MAX_EDGE) {
-                float scale = (float) MAX_EDGE / max;
+            if (max > maxEdge) {
+                float scale = (float) maxEdge / max;
                 Bitmap small = Bitmap.createScaledBitmap(bmp,
                         Math.max(1, Math.round(w * scale)),
                         Math.max(1, Math.round(h * scale)), true);
@@ -156,7 +203,7 @@ public final class Shot {
                 }
             }
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            work.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos);
+            work.compress(Bitmap.CompressFormat.JPEG, quality, bos);
             return bos.toByteArray();
         } catch (Exception e) {
             return null;

@@ -1,20 +1,20 @@
 {
-  "versionCode": 40,
-  "versionName": "4.1.1",
+  "versionCode": 41,
+  "versionName": "4.2",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "移除 SakuraFrp/frpc（接单端 1.5MB）；修复规格系列 bug（减号按规格减、冰箱存规格、历史显示规格、旧菜单覆盖规格）；核心健壮性：HTTP 请求体与 MQTT 包加大小上限防 OOM、前台服务启动失败不再崩溃、菜谱与聊天落盘",
+  "notes": "冰箱「再囤几道」列表不再为空（规格展开成多行）；「选规格」标签与加号合并为圆角矩形按钮；感光切换加防抖与滞滞（阈值 20/200 lux、间隔 8s、连续两次同向才切）+ 300ms 日月过渡遮罩；截图提升到 1600px/92%（直连高清，中转账仍用低清）",
   "order": {
-    "versionCode": 40,
-    "versionName": "4.1.1",
+    "versionCode": 41,
+    "versionName": "4.2",
     "url": "",
-    "size": 767331
+    "size": 771427
   },
   "recv": {
-    "versionCode": 40,
-    "versionName": "4.1.1",
+    "versionCode": 41,
+    "versionName": "4.2",
     "url": "",
-    "size": 1533367
+    "size": 1541559
   },
-  "size": 767331
+  "size": 771427
 }

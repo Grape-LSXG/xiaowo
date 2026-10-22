@@ -103,6 +103,8 @@ public final class Theme {
                 if (lux == null) {
                     return;
                 }
+                // 与 Ambient 的暗阈值保持一致（20 lux）；这里只在冷启动/回前台时跑一次，
+                // 不存在抖动问题，所以不需要更复杂的状态机
                 boolean wantDark = lux.floatValue() < 20f;
                 if (applyAuto(c, wantDark) && onChanged != null) {
                     new android.os.Handler(android.os.Looper.getMainLooper()).post(onChanged);
@@ -369,9 +371,26 @@ public final class Theme {
         private final Handler ui = new Handler(Looper.getMainLooper());
         private long lastEval = 0L;
         private boolean registered = false;
+        /** 上一次的"同向"判定：用来要求连续两次一致才真正切换 */
+        private int lastDir = 0;    // 0=无 1=想变暗 -1=想变亮
 
+        /*
+         * 阈值与防抖（针对"屏幕一直闪"）。
+         *
+         * 光传感器在真实环境里是抖动很厉害的：有人走过、云飘过、
+         * 台灯角度变一点，读数就能在几十到几百 lux 之间跳。
+         * 原来只要跨过一次阈值就重建界面，于是光线在阈值附近晃时
+         * 界面会被反复重建 —— 观感就是屏幕一直在闪。
+         *
+         * 三重防护：
+         *   1. 拉大滞回区间：暗→亮要冲过 LIGHT_LUX，亮→暗要跌破 DARK_LUX，
+         *      中间 20~200 这片区域完全不动（原来是 20~120，太窄）。
+         *   2. 判定间隔从 3 秒提到 8 秒 —— 即使抖动也不会连续触发。
+         *   3. **连续两次同向才算数**：单次尖峰不切，避免一次闪光灯就变天。
+         */
         private static final float DARK_LUX = 20f;
-        private static final float LIGHT_LUX = 120f;
+        private static final float LIGHT_LUX = 200f;
+        private static final long MIN_INTERVAL_MS = 8000L;
 
         public Ambient(Context c, Listener l) {
             this.ctx = c;
@@ -413,7 +432,8 @@ public final class Theme {
             }
             float lux = e.values[0];
             long now = System.currentTimeMillis();
-            if (now - lastEval < 3000) {
+            // 判定间隔拉长：抖动再厉害也不会连续触发
+            if (now - lastEval < MIN_INTERVAL_MS) {
                 return;
             }
             // 没拿到有效值就别动
@@ -421,16 +441,30 @@ public final class Theme {
                 return;
             }
             boolean cur = Theme.isDark();
-            boolean want = cur;
+            int dir;    // 1=想变暗 -1=想变亮 0=不动
             if (lux < DARK_LUX && !cur) {
-                want = true;
+                dir = 1;
             } else if (lux > LIGHT_LUX && cur) {
-                want = false;
+                dir = -1;
             } else {
-                return;   // 滞回区 / 没变化
+                // 落在滞回区间（DARK_LUX ~ LIGHT_LUX）里，保持现状
+                dir = 0;
             }
+            if (dir == 0) {
+                lastDir = 0;   // 回到中间区间，之前的"一次同向"作废
+                return;
+            }
+            /*
+             * 连续两次同向才切换。
+             * 单次尖峰（有人开了一下灯、闪光灯、窗外过一辆车）不足以改变主题。
+             */
+            if (dir != lastDir) {
+                lastDir = dir;
+                return;
+            }
+            lastDir = 0;    // 用掉这次判定
             lastEval = now;
-            listener.onAmbientChanged(want);
+            listener.onAmbientChanged(dir == 1);
         }
 
         @Override

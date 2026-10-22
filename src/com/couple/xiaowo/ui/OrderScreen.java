@@ -722,7 +722,11 @@ public class OrderScreen extends LinearLayout {
                  */
                 new Thread(new Runnable() {
                     public void run() {
-                        String b64 = com.couple.xiaowo.core.Shot.captureBase64(act,
+                        /*
+                         * 走中转的截图用低清版：公共 MQTT broker 对大包不友好，
+                         * QoS0 下大消息会被丢弃，回传就失败了。
+                         */
+                        String b64 = com.couple.xiaowo.core.Shot.captureBase64ForRelay(act,
                                 OrderScreen.this);
                         if (b64 != null) {
                             com.couple.xiaowo.core.Relay.publish(act, Protocol.ROLE_ORDER,
@@ -1174,23 +1178,19 @@ public class OrderScreen extends LinearLayout {
         dLp.topMargin = dp(3);
         texts.addView(desc, dLp);
 
-        LinearLayout metaRow = Ui.horizontal(act);
-        metaRow.setGravity(Gravity.CENTER_VERTICAL);
-        metaRow.addView(Ui.tv(act, "月销 " + it.monthly + " · ❤" + it.price,
-                10, Ui.SUB, false));
-        if (it.hasSpecs()) {
-            TextView specTag = Ui.pill(act, "选规格", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
-                    9f, 8, 2, true);
-            LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            spLp.leftMargin = dp(6);
-            metaRow.addView(specTag, spLp);
-        }
+        /*
+         * 「选规格」那个小标签已经去掉。
+         *
+         * 原因：它和右侧的「+」做的是同一件事（都是点了去选规格），
+         * 而且它本身不可点击 —— 用户点了没反应，属于"看着像按钮但不是"。
+         * 现在统一由右侧那个圆角矩形按钮承担：有规格时它直接写「选规格」。
+         */
+        TextView sales = Ui.tv(act, "月销 " + it.monthly + " · ❤" + it.price,
+                10, Ui.SUB, false);
         LinearLayout.LayoutParams saLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         saLp.topMargin = dp(3);
-        texts.addView(metaRow, saLp);
+        texts.addView(sales, saLp);
 
         row.addView(texts);
 
@@ -1733,28 +1733,46 @@ public class OrderScreen extends LinearLayout {
             t.setTypeface(Typeface.create(Typeface.SANS_SERIF, on ? Typeface.BOLD : Typeface.NORMAL));
         }
     }
+    /**
+     * 右侧操作区。
+     *
+     * 形态上统一用**圆角矩形**（原来是圆形），因为带规格的菜需要一个
+     * 能放字的按钮：没规格显示「＋」，有规格显示「选规格」。
+     * 圆形放不下三个字，硬塞会挤成很小。
+     *
+     * 加号/选规格合并成一个按钮后，就没有"两个入口做同一件事"的困惑了。
+     */
     private void refreshActions(String name) {
         LinearLayout box = actionBoxes.get(name);
         if (box == null) {
             return;
         }
         box.removeAllViews();
+        Menu.Item it = byName.get(name);
+        boolean needSpec = it != null && it.hasSpecs();
         // 同一种菜可能散在多个规格行里，这里显示的是**总份数**
         int qty = com.couple.xiaowo.core.CartKey.totalQty(cart, name);
+
         if (qty > 0) {
-            TextView minus = tinyCircle("−", 0xFFF2EEFB, Ui.PURPLE_DEEP, 24, 15);
+            TextView minus = rectBtn("−", 0xFFF2EEFB, Ui.PURPLE_DEEP, dp(30));
             minus.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     minusFor(name);
                 }
             });
             box.addView(minus);
-            TextView count = tinyCircle(String.valueOf(qty), Ui.PURPLE, 0xFFFFFFFF, 28, 13);
-            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(dp(28), dp(28));
-            cLp.leftMargin = dp(4);
-            cLp.rightMargin = dp(4);
+
+            TextView count = Ui.tv(act, String.valueOf(qty), 13, Ui.PURPLE, true);
+            count.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            cLp.leftMargin = dp(7);
+            cLp.rightMargin = dp(7);
             box.addView(count, cLp);
-            TextView plus = tinyCircle("+", Ui.PURPLE, 0xFFFFFFFF, 28, 16);
+
+            TextView plus = rectBtn(needSpec ? "选规格" : "＋",
+                    Ui.PURPLE, 0xFFFFFFFF, needSpec ? dp(64) : dp(30));
             plus.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     plusFor(name);
@@ -1762,7 +1780,8 @@ public class OrderScreen extends LinearLayout {
             });
             box.addView(plus);
         } else {
-            TextView plus = tinyCircle("+", 0xFFEDE7FB, Ui.PURPLE_DEEP, 30, 18);
+            TextView plus = rectBtn(needSpec ? "选规格" : "＋",
+                    0xFFEDE7FB, Ui.PURPLE_DEEP, needSpec ? dp(64) : dp(30));
             plus.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     plusFor(name);
@@ -1770,6 +1789,23 @@ public class OrderScreen extends LinearLayout {
             });
             box.addView(plus);
         }
+    }
+
+    /**
+     * 圆角矩形小按钮。
+     *
+     * @param widthPx 宽度；高度固定，宽度按文字量给（「＋」窄、「选规格」宽）
+     */
+    private TextView rectBtn(String text, int bg, int fg, int widthPx) {
+        TextView t = Ui.tv(act, text, text.length() > 1 ? 11.5f : 16f, fg, true);
+        t.setGravity(Gravity.CENTER);
+        t.setBackground(Ui.round(bg, dp(10)));
+        t.setMinWidth(widthPx);
+        t.setPadding(dp(10), dp(6), dp(10), dp(6));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(30));
+        t.setLayoutParams(lp);
+        return t;
     }
 
     /**
@@ -2048,27 +2084,44 @@ public class OrderScreen extends LinearLayout {
             }
         }).start();
     }
+    /**
+     * 「再囤几道」—— 列菜让用户勾选囤进冰箱。
+     *
+     * ── 之前为什么是空列表 ──
+     *
+     * 上一版这里只列 `!it.hasSpecs()` 的菜，理由是"有规格的菜要先选规格，
+     * 多选列表表达不了"。但后来给 22 道预制菜**全部配上了规格**，
+     * 于是筛选结果恒为空 —— 用户点开只看到一片空白。
+     *
+     * ── 现在怎么做 ──
+     *
+     * 不再筛掉带规格的菜，而是让每一项显示成「菜名」或「菜名 · 规格」，
+     * 规格展开成多行。这样列表里永远有东西，且勾选的含义明确。
+     * 默认勾选冰箱里已有的组合，取消勾选即从冰箱移除。
+     */
     private void showFridgePicker() {
-        /*
-         * 只列**没有规格**的菜。
-         *
-         * 有规格的菜需要先确定囤哪个规格，这个多选列表表达不了
-         * （同一个菜要出现多行、每行一个规格），所以走厨房里长按那道菜的方式。
-         * 这样也不会出现"勾了个菜名但不知道囤的是哪个规格"。
-         */
-        final List<String> names = new ArrayList<String>();
+        // 1) 展开成「可囤的组合」：没规格的只有一行，有规格的每个规格一行
+        final List<String> keys = new ArrayList<String>();
+        final List<String> labels = new ArrayList<String>();
         for (Menu.Category c : Menu.CATEGORIES) {
             for (Menu.Item it : c.items) {
                 if (!it.hasSpecs()) {
-                    names.add(it.name);
+                    keys.add(it.name);
+                    labels.add(it.name);
+                } else {
+                    for (String sp : it.specs) {
+                        keys.add(com.couple.xiaowo.core.CartKey.of(it.name, sp));
+                        labels.add(it.name + " · " + sp);
+                    }
                 }
             }
         }
-        final String[] arr = names.toArray(new String[0]);
-        final boolean[] checked = new boolean[arr.length];
-        for (int i = 0; i < arr.length; i++) {
-            checked[i] = fridge.contains(arr[i]);
+        final String[] arr = labels.toArray(new String[0]);
+        final boolean[] checked = new boolean[keys.size()];
+        for (int i = 0; i < keys.size(); i++) {
+            checked[i] = fridge.contains(keys.get(i));
         }
+
         new AlertDialog.Builder(act)
                 .setTitle("选几道菜囤进冰箱")
                 .setMultiChoiceItems(arr, checked, new DialogInterface.OnMultiChoiceClickListener() {
@@ -2078,12 +2131,13 @@ public class OrderScreen extends LinearLayout {
                 })
                 .setPositiveButton("保存", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dlg, int which) {
-                        for (int i = 0; i < arr.length; i++) {
-                            boolean in = fridge.contains(arr[i]);
+                        for (int i = 0; i < keys.size(); i++) {
+                            String key = keys.get(i);
+                            boolean in = fridge.contains(key);
                             if (checked[i] && !in) {
-                                fridge.add(arr[i]);
+                                fridge.add(key);
                             } else if (!checked[i] && in) {
-                                fridge.remove(arr[i]);
+                                fridge.remove(key);
                             }
                         }
                         saveFridge();
@@ -2609,6 +2663,7 @@ public class OrderScreen extends LinearLayout {
      */
     private String shotForPeer() {
         try {
+            // 直连 HTTP 回传：用高清版（局域网带宽足够，打字都看得清）
             String b64 = com.couple.xiaowo.core.Shot.captureBase64(act, this);
             if (b64 != null) {
                 return b64;

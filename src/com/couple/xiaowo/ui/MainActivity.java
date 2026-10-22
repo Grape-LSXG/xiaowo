@@ -225,11 +225,21 @@ public class MainActivity extends Activity implements HeartHost {
         }
         ambient = new Theme.Ambient(this, new Theme.Ambient.Listener() {
             @Override
-            public void onAmbientChanged(boolean nowDark) {
+            public void onAmbientChanged(final boolean nowDark) {
                 if (!Theme.applyAuto(MainActivity.this, nowDark)) {
                     return;
                 }
-                recreate();
+                /*
+                 * 不再直接 recreate()。
+                 *
+                 * 直接重建会在屏幕上"啪"地换色，光线一抖就闪；
+                 * 现在先盖一层 300ms 的日/月遮罩，把重建藏在遮罩后面。
+                 */
+                ThemeSwitchOverlay.play(MainActivity.this, nowDark, new Runnable() {
+                    public void run() {
+                        recreate();
+                    }
+                });
             }
         });
         ambient.start();
