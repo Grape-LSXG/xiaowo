@@ -81,6 +81,59 @@ public final class PermissionGate {
         }
     };
 
+    /**
+     * vivo 专属引导：锁屏显示 + 后台弹出界面 + 自启动。
+     *
+     * 这三项在 vivo（OriginOS/FuntouchOS）上属于「权限管理 → 其他权限」
+     * 和「电池 → 后台耗电管理」体系，没有统一的系统 Intent 能一键打开，
+     * 所以跳 App 详情页，让用户在那个页面里逐项开（很多条目也在同一页）。
+     */
+    private static final Missing VIVO_AUTOSTART = new Missing() {
+        @Override
+        public String title() {
+            return "需要 vivo 后台权限";
+        }
+
+        @Override
+        public String desc() {
+            return "为了让锁屏也能弹出提醒，请在手机管家（i管家）里开启：\n"
+                    + "· 自启动\n"
+                    + "· 锁屏显示\n"
+                    + "· 后台弹出界面\n"
+                    + "· 允许后台高耗电\n"
+                    + "点「去设置」会直接打开 i管家。";
+        }
+
+        @Override
+        public boolean go(Activity act) {
+            // 优先打开 vivo/iQOO 手机管家（i管家），自启动/后台管理入口都集中在那
+            try {
+                Intent i = act.getPackageManager()
+                        .getLaunchIntentForPackage("com.iqoo.secure");
+                if (i == null) {
+                    i = act.getPackageManager()
+                            .getLaunchIntentForPackage("com.vivo.abe");
+                }
+                if (i != null) {
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    act.startActivity(i);
+                    return true;
+                }
+            } catch (Exception ignore) {
+            }
+            // 找不到 i管家，退回 App 详情页
+            try {
+                Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + act.getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                act.startActivity(i);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+    };
+
     private PermissionGate() {
     }
 
@@ -92,6 +145,11 @@ public final class PermissionGate {
         if (!Updater.canInstall(act)) {
             return INSTALL;
         }
+        /*
+         * 通知权限单独提示（SystemNotify.request 会弹系统框），
+         * 这里不重复；但 vivo 的锁屏显示 / 后台弹出 / 自启动
+         * 没有可编程检测的手段，只在首次进入时引导一次。
+         */
         return null;
     }
 
@@ -99,6 +157,11 @@ public final class PermissionGate {
     public static boolean ensure(final Activity act) {
         final Missing m = firstMissing(act);
         if (m == null) {
+            // 硬权限都齐了，再引导一次 vivo 后台设置（只引导一次）
+            if (shouldShowVivoGuide(act)) {
+                showVivoGuide(act);
+                return false;
+            }
             return true;
         }
         Dialog dlg = DialogKit.customBlocking(act, m.title(), m.desc(),
@@ -112,5 +175,32 @@ public final class PermissionGate {
             m.go(act);
         }
         return false;
+    }
+
+    /** vivo 后台引导是否还没展示过（每个 App 只引导一次） */
+    private static boolean shouldShowVivoGuide(Activity act) {
+        return !act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE)
+                .getBoolean("vivo_guide_shown", false);
+    }
+
+    private static void showVivoGuide(final Activity act) {
+        Dialog dlg = DialogKit.customBlocking(act, VIVO_AUTOSTART.title(), VIVO_AUTOSTART.desc(),
+                "去设置", new Runnable() {
+                    public void run() {
+                        VIVO_AUTOSTART.go(act);
+                        act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE)
+                                .edit().putBoolean("vivo_guide_shown", true).apply();
+                    }
+                });
+        // 加了 onKeyListener 锁返回键；用户如果强行返回不走按钮，也算引导过
+        if (dlg != null) {
+            dlg.setOnDismissListener(new android.content.DialogInterface.OnDismissListener() {
+                @Override
+                public void onDismiss(android.content.DialogInterface d) {
+                    act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE)
+                            .edit().putBoolean("vivo_guide_shown", true).apply();
+                }
+            });
+        }
     }
 }
