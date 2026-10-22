@@ -1,7 +1,7 @@
 {
-  "versionCode": 22,
-  "versionName": "3.1",
+  "versionCode": 23,
+  "versionName": "3.2",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "主页改用「连接方式」入口（去掉 SakuraFrp 表述）；GitHub Release 更新通道；点单端异地自动更新修复"
+  "notes": "GitHub Release 更新通道已上线并实测通过；主页改用「连接方式」入口"
 }
