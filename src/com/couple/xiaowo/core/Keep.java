@@ -146,6 +146,113 @@ public final class Keep {
         return KeepAlive.isRunning();
     }
 
+    // ------------------------------------------------------------------ 电池优化
+
+    /**
+     * 系统是不是已经对本应用免除电池优化。
+     *
+     * 判定用 isIgnoringBatteryOptimizations()：返回 true 表示已免除，
+     * 也就是系统不会在 Doze 里掐我们的网络和定时器。
+     */
+    public static boolean isIgnoringBattery(Context c) {
+        if (c == null) {
+            return true;    // 拿不到就当作没问题，别无端骚扰用户
+        }
+        try {
+            if (Build.VERSION.SDK_INT < 23) {
+                return true;    // 6.0 以前没有 Doze
+            }
+            android.os.PowerManager pm = (android.os.PowerManager)
+                    c.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) {
+                return true;
+            }
+            return pm.isIgnoringBatteryOptimizations(c.getPackageName());
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    /**
+     * 拉起系统的「电池优化」豁免对话框。
+     *
+     * 为什么用 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 而不是
+     * 直接跳设置列表：前者是系统弹一个"允许免除电池优化？"的确认框，
+     * 用户点一下就完事；后者要用户自己在长列表里翻找，很容易放弃。
+     *
+     * 需要 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 权限（已在清单里声明）。
+     * 有些 ROM 会把这条 Intent 拦掉，这时退回设置列表页。
+     */
+    public static void requestIgnoreBattery(Activity act) {
+        if (act == null) {
+            return;
+        }
+        if (isIgnoringBattery(act)) {
+            try {
+                android.widget.Toast.makeText(c0(act), "已允许后台运行",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            } catch (Exception ignore) {
+            }
+            return;
+        }
+        try {
+            Intent i = new Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(android.net.Uri.parse("package:" + act.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            markBatteryHintShown(act);
+            return;
+        } catch (Exception ignore) {
+        }
+        // 兜底：打开电池优化列表，让用户自己找
+        try {
+            Intent i = new Intent(
+                    android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            markBatteryHintShown(act);
+        } catch (Exception ignore) {
+        }
+    }
+
+    private static Context c0(Activity act) {
+        return act;
+    }
+
+    /** 电池优化提示是否已经提示过一次 */
+    public static boolean batteryHintShown(Context c) {
+        return c != null && c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
+                .getBoolean("battery_hint_shown", false);
+    }
+
+    public static void markBatteryHintShown(Context c) {
+        try {
+            c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
+                    .edit().putBoolean("battery_hint_shown", true).apply();
+        } catch (Exception ignore) {
+        }
+    }
+
+    /**
+     * 厂商后台限制的引导是否已经确认过。
+     *
+     * vivo/小米/OPPO 的「自启动」「后台高耗电」「锁屏显示」都没有公开 API
+     * 能检测，只能确认一次"我带你去过那个页面"。
+     */
+    public static boolean oemGuideConfirmed(Context c) {
+        return c != null && c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
+                .getBoolean("oem_guide_ok", false);
+    }
+
+    public static void markOemGuideConfirmed(Context c) {
+        try {
+            c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
+                    .edit().putBoolean("oem_guide_ok", true).apply();
+        } catch (Exception ignore) {
+        }
+    }
+
     /** 「去补悬浮窗权限」 */
     public static void goOverlay(Activity act) {
         PixelKeeper.requestOverlay(act);
@@ -158,6 +265,12 @@ public final class Keep {
 
     /** 跳到本 App 的应用详情页（后台限制 / 自启动都在那附近） */
     public static void goAppDetail(Activity act) {
+        if (act == null) {
+            return;
+        }
+        // 点过就算"带用户去过一次" —— 至于系统里那几个开关他开没开，
+        // 没有任何公开 API 能读到，只能靠这次确认避免反复打扰。
+        markOemGuideConfirmed(act);
         try {
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     android.net.Uri.parse("package:" + act.getPackageName()));

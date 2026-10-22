@@ -128,19 +128,13 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         switchTab(sp.getInt("cur_tab", TAB_KITCHEN));
         startListening();
 
-        // 启动时自动检查 GitHub 更新（默认开启，发现新版直接下载安装）
-        postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                GitHubCard.run(act, true, null, null, false);
-            }
-        }, 1500);
+        // 启动时不再自动检查更新（改为手动，见「我」页的「检查更新」）
 
         // 启动后同步订单/聊天记录给对方（延迟，等双方服务起来）
         scheduleSyncPush();
 
         // 使用中周期性检查 GitHub 更新（静默，偶尔试一次）
-        GitHubCard.startPeriodic(act, true);
+        // 周期自动检查已关闭：更新只在用户点「检查更新」时进行
     }
 
     private int dp(float v) {
@@ -522,7 +516,10 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         for (Protocol.Line l : o.lines) {
             LinearLayout row = Ui.horizontal(act);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.addView(Ui.tv(act, (l.emoji == null || l.emoji.length() == 0 ? "🐾" : l.emoji) + " " + l.name,
+            // 用 displayName()：带规格的菜显示成「要亲亲·脸颊」，
+            // 不然接单端只看到"要亲亲"根本不知道对方要的是哪个
+            row.addView(Ui.tv(act, (l.emoji == null || l.emoji.length() == 0 ? "🐾" : l.emoji)
+                            + " " + l.displayName(),
                     12.5f, Ui.TEXT, false), new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(Ui.tv(act, "×" + l.qty + "  ❤" + (l.price * l.qty), 11.5f, Ui.SUB, false));
@@ -570,11 +567,12 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         final Map<String, String> emojis = new java.util.LinkedHashMap<String, String>();
         for (Protocol.Order o : orders) {
             for (Protocol.Line l : o.lines) {
-                Integer c = counts.get(l.name);
-                counts.put(l.name, c == null ? l.qty : c + l.qty);
-                prices.put(l.name, l.price);
+                String disp = l.displayName();
+                Integer c = counts.get(disp);
+                counts.put(disp, c == null ? l.qty : c + l.qty);
+                prices.put(disp, l.price);
                 if (l.emoji != null && l.emoji.length() > 0) {
-                    emojis.put(l.name, l.emoji);
+                    emojis.put(disp, l.emoji);
                 }
             }
         }
@@ -830,7 +828,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
             }
         });
         shotRow.addView(shotBtn);
-        TextView shotHint = Ui.tv(act, "静默截，她那边不会有任何弹窗", 10, Ui.TEXT_MUTED, false);
+        TextView shotHint = Ui.tv(act, "她那边不需要任何操作", 10, Ui.TEXT_MUTED, false);
         LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         shLp.leftMargin = dp(10);
@@ -1632,8 +1630,9 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
         for (Protocol.Order o : orders) {
             for (Protocol.Line l : o.lines) {
-                Integer c = counts.get(l.name);
-                counts.put(l.name, c == null ? l.qty : c + l.qty);
+                String disp = l.displayName();
+                Integer c = counts.get(disp);
+                counts.put(disp, c == null ? l.qty : c + l.qty);
             }
         }
         String best = null;

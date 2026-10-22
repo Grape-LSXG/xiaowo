@@ -59,7 +59,7 @@ public final class PeerUpdateCard {
 
         card.addView(Ui.tv(act,
                 "张老师更新了接单端，新版本就跟着到了他手机里；\n"
-                        + "你这边打开 App 时会自动问一句，有新版就装。",
+                        + "点下面的按钮就能取过来。",
                 10, Ui.TEXT_MUTED, false), top(act, 8));
 
         final TextView checkBtn = Ui.pill(act, "🔄 检查并更新", Ui.PRIMARY, 0xFFFFFFFF, 12.5f, 20, 10, true);
@@ -78,30 +78,11 @@ public final class PeerUpdateCard {
         });
         card.addView(checkBtn, top(act, 10));
 
-        // 自动检查开关
-        final boolean[] on = {autoEnabled(act)};
-        final LinearLayout toggle = Ui.horizontal(act);
-        toggle.setGravity(Gravity.CENTER_VERTICAL);
-        toggle.setPadding(dp(act, 10), dp(act, 9), dp(act, 10), dp(act, 9));
-        final TextView box = Ui.tv(act, on[0] ? "☑" : "☐", 15,
-                on[0] ? Ui.PRIMARY : Ui.TEXT_MUTED, false);
-        toggle.addView(box);
-        TextView label = Ui.tv(act, "打开 App 时自动检查更新", 12, Ui.TEXT, false);
-        LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT);
-        lLp.weight = 1f;
-        lLp.leftMargin = dp(act, 8);
-        toggle.addView(label, lLp);
-        toggle.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                on[0] = !on[0];
-                setAuto(act, on[0]);
-                box.setText(on[0] ? "☑" : "☐");
-                box.setTextColor(on[0] ? Ui.PRIMARY : Ui.TEXT_MUTED);
-                Toast2.ok(act, on[0] ? "已开启自动检查" : "已关闭自动检查");
-            }
-        });
-        card.addView(toggle, top(act, 8));
+        /*
+         * 这里原来有个「打开 App 时自动检查更新」的复选框。
+         * 已经去掉：更新一律由用户主动点触发，不再有"偷偷检查"的行为，
+         * 这样也更符合用户对"手动更新"的预期。
+         */
 
         return card;
     }

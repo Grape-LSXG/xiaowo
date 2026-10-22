@@ -33,7 +33,7 @@ public final class UpdateCard {
 
         LinearLayout head = Ui.horizontal(act);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.addView(Ui.tv(act, "⬆ 自动更新", 14, Ui.TEXT, true));
+        head.addView(Ui.tv(act, "⬆ 手动更新", 14, Ui.TEXT, true));
         head.addView(new View(act), new LinearLayout.LayoutParams(0, 1, 1f));
         head.addView(Ui.chip(act, Ui.appVersion(act),
                 Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 10));

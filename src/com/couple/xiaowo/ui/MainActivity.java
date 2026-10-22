@@ -395,6 +395,21 @@ public class MainActivity extends Activity implements HeartHost {
     @Override
     protected void onDestroy() {
         AlertCenter.dismissOverlay();
+        /*
+         * 必须关掉中转订阅。
+         *
+         * 原来漏了这一步：Activity 重建（主题切换、授权返回）时旧的 Sub 线程
+         * 还在跑，还持有旧的 Listener —— 消息会投递到已经销毁的界面上，
+         * 而且每重建一次就多一个 MQTT 长连接（公共 broker 那边也会攒连接）。
+         */
+        if (relaySub != null) {
+            try {
+                relaySub.close();
+            } catch (Exception ignore) {
+            }
+            relaySub = null;
+        }
+        relayStatusViews.clear();
         if (orderScreen != null) {
             orderScreen.shutdown();
         }

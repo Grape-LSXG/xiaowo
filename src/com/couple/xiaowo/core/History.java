@@ -25,7 +25,8 @@ public final class History {
                         "qty", String.valueOf(l.qty),
                         "price", String.valueOf(l.price),
                         "cat", String.valueOf(l.cat),
-                        "emoji", Json.quote(l.emoji))));
+                        "emoji", Json.quote(l.emoji),
+                        "spec", Json.quote(l.spec))));
             }
             return Json.object(Json.fields(
                     "ts", String.valueOf(ts),
@@ -49,7 +50,8 @@ public final class History {
                         (int) Json.num(im, "qty", 1),
                         (int) Json.num(im, "price", 0),
                         (int) Json.num(im, "cat", 0),
-                        Json.str(im, "emoji", "")));
+                        Json.str(im, "emoji", ""),
+                        Json.str(im, "spec", "")));
             }
             return e;
         }
@@ -68,7 +70,7 @@ public final class History {
                 if (sb.length() > 0) {
                     sb.append('、');
                 }
-                sb.append(l.name);
+                sb.append(l.displayName());
                 if (l.qty > 1) {
                     sb.append(" ×").append(l.qty);
                 }

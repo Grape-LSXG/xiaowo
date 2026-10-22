@@ -134,7 +134,7 @@ public final class GitHubCard {
 
         // 说明：启动自动检查是默认行为，不再提供开关
         card.addView(Ui.tv(act,
-                "每次打开 App 都会自动检查更新，有新版本就直接下载安装。",
+                "发现新版本时会提示你，确认后才会下载安装。",
                 10, Ui.TEXT_MUTED, false), top(act, 4));
         return card;
     }

@@ -76,7 +76,7 @@ public final class AlertCenter {
     /** 引导用户去开悬浮窗权限 */
     public static void requestOverlay(final Activity act) {
         if (canOverlay(act)) {
-            Toast2.ok(act, "悬浮窗权限已经有了");
+            Toast2.ok(act, "提醒权限已经有了");
             return;
         }
         try {

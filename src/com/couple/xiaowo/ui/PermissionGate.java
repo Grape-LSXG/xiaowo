@@ -253,6 +253,8 @@ public final class PermissionGate {
                         VIVO_AUTOSTART.go(act);
                         pret(act)
                                 .edit().putBoolean("vivo_guide_shown", true).apply();
+                        // 和 KeepAliveCard 的「后台运行」状态保持同一份标记
+                        com.couple.xiaowo.core.Keep.markOemGuideConfirmed(act);
                     }
                 });
         // 无论怎么关的框，都标记已引导过，下次不再弹
@@ -263,6 +265,7 @@ public final class PermissionGate {
                         public void onDismiss(android.content.DialogInterface d) {
                             pret(act)
                                     .edit().putBoolean("vivo_guide_shown", true).apply();
+                            com.couple.xiaowo.core.Keep.markOemGuideConfirmed(act);
                             blockingDialog = null;
                         }
                     });

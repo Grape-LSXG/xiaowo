@@ -154,90 +154,22 @@ public class OrderScreen extends LinearLayout {
         scheduleAutoPeerUpdate();
         scheduleSyncPush();
         // 使用中周期性检查 GitHub 更新（静默，偶尔试一次）
-        GitHubCard.startPeriodic(act, false);
+        // 周期自动检查已关闭：更新只在用户点「检查更新」时进行
     }
 
     /**
-     * 打开 App 后自动问一句接单端「有没有比我新的包」。
-     * 用 postDelayed 让首屏先渲染完，避免启动卡顿。
+     * 启动时的自动检查已经**整段去掉**（按需求改为纯手动更新）。
+     *
+     * 保留这个方法名的地方全部改成空实现，避免遗漏调用点；
+     * 真正的检查入口只有一个：用户在「我」页点「检查更新」。
+     *
+     * 为什么不再自动查：
+     *   自动下载 + 系统安装器弹出是"打断式"的，用户正在点单时突然
+     *   跳安装界面体验很差；而且失败时用户完全无感，会以为功能坏了。
+     *   改手动之后，行为完全可预期。
      */
     private void scheduleAutoPeerUpdate() {
-        /*
-         * 启动时先问 GitHub —— 这条路不依赖"接单端此刻在不在线"，
-         * 是异地时唯一可靠的自动更新来源。
-         * 默认开启（去掉开关），每次启动都检查，发现新版自动下载安装。
-         */
-        act.getWindow().getDecorView().postDelayed(new Runnable() {
-            public void run() {
-                com.couple.xiaowo.ui.GitHubCard.run(act, false, null, null, false);
-            }
-        }, 1200);
-        if (!PeerUpdateCard.autoEnabled(act)) {
-            return;
-        }
-        act.getWindow().getDecorView().postDelayed(new Runnable() {
-            public void run() {
-                new Thread(new Runnable() {
-                    public void run() {
-                        // 优先用已保存的地址，没有再自动发现
-                        String host = peerHost;
-                        int port = peerPort;
-                        if (host == null || port <= 0) {
-                            java.util.List<Net.Peer> peers = Net.discover(1500);
-                            if (peers.isEmpty()) {
-                                /*
-                                 * 局域网找不到人 —— 异地场景。
-                                 * 之前这里直接 return，所以"自动更新"在异地时
-                                 * 永远不触发，用户只能手动点。
-                                 * 现在改走中转问一次版本（中转能传消息，传不了包）。
-                                 */
-                                if (com.couple.xiaowo.core.Relay.enabled(act)) {
-                                    act.runOnUiThread(new Runnable() {
-                                        public void run() {
-                                            askPeerVersionViaRelay(true);
-                                        }
-                                    });
-                                }
-                                return;
-                            }
-                            host = peers.get(0).host;
-                            port = peers.get(0).port;
-                            final String fh = host;
-                            final int fp = port;
-                            peerHost = fh;
-                            peerPort = fp;
-                            sp.edit().putString("peer_host", fh).putInt("peer_port", fp).apply();
-                        }
-                        final String fHost = host;
-                        final int fPort = port;
-                        ApkRelay.check(act, fHost, fPort, new ApkRelay.Callback() {
-                            public void done(final ApkRelay.Info info, String error) {
-                                if (info == null) {
-                                    /*
-                                     * 直连问不到 —— 可能是异地，也可能是对方没开分享。
-                                     * 已配对中转就再问一次，这样"自动更新"在异地也能工作。
-                                     */
-                                    if (error != null
-                                            && com.couple.xiaowo.core.Relay.enabled(act)) {
-                                        act.runOnUiThread(new Runnable() {
-                                            public void run() {
-                                                askPeerVersionViaRelay(false);
-                                            }
-                                        });
-                                    }
-                                    return;
-                                }
-                                act.runOnUiThread(new Runnable() {
-                                    public void run() {
-                                        promptPeerUpdate(fHost, fPort, info);
-                                    }
-                                });
-                            }
-                        });
-                    }
-                }).start();
-            }
-        }, 600);
+        // 不自动检查。更新一律由用户在「我」页手动触发。
     }
 
     /**
@@ -459,11 +391,14 @@ public class OrderScreen extends LinearLayout {
         o.note = note;
         o.fromName = Protocol.NAME_ORDER;
         for (Map.Entry<String, Integer> e : cart.entrySet()) {
-            Menu.Item it = byName.get(e.getKey());
+            String dishName = com.couple.xiaowo.core.CartKey.nameOf(e.getKey());
+            String spec = com.couple.xiaowo.core.CartKey.specOf(e.getKey());
+            Menu.Item it = byName.get(dishName);
             if (it == null) {
                 continue;
             }
-            o.lines.add(new Protocol.Line(it.name, e.getValue(), it.price, it.cat, it.emoji));
+            o.lines.add(new Protocol.Line(it.name, e.getValue(), it.price, it.cat,
+                    it.emoji, spec));
             o.total += it.price * e.getValue();
         }
         o.replyHost = Net.localIpv4();
@@ -872,13 +807,25 @@ public class OrderScreen extends LinearLayout {
         });
     }
 
+    /** 加一份（不带规格的菜）。带规格的走 addToCartSpec */
     private void addToCart(String name, int delta) {
-        int q = cart.containsKey(name) ? cart.get(name) : 0;
+        addToCartSpec(name, "", delta);
+    }
+
+    /**
+     * 加减一份。key 由「菜名 + 规格」组成，所以同一道菜的不同规格各算一行。
+     *
+     * 减到 0 时删掉**这一行**，不动同名的其他规格 —— 这是关键：
+     * 用户点「要亲亲·脸颊 −」不应该顺手把「要亲亲·嘴巴」也减掉。
+     */
+    private void addToCartSpec(String name, String spec, int delta) {
+        String key = com.couple.xiaowo.core.CartKey.of(name, spec);
+        int q = cart.containsKey(key) ? cart.get(key) : 0;
         q += delta;
         if (q <= 0) {
-            cart.remove(name);
+            cart.remove(key);
         } else {
-            cart.put(name, q);
+            cart.put(key, q);
         }
         refreshActions(name);
         updateCart();
@@ -993,9 +940,17 @@ public class OrderScreen extends LinearLayout {
                 public void onClick(View v) {
                     cart.clear();
                     for (String n : fridge) {
-                        if (byName.containsKey(n)) {
-                            cart.put(n, 1);
+                        Menu.Item fi = byName.get(n);
+                        if (fi == null) {
+                            continue;
                         }
+                        /*
+                         * 有规格的菜不能直接塞进购物车 —— 那样等于"没选规格"。
+                         * 这里取它的第一个规格作为默认值，
+                         * 并在提示里说明可以再点「+」换别的规格。
+                         */
+                        String sp = fi.hasSpecs() ? fi.specs.get(0) : "";
+                        cart.put(com.couple.xiaowo.core.CartKey.of(n, sp), 1);
                     }
                     for (String k : new ArrayList<String>(actionBoxes.keySet())) {
                         refreshActions(k);
@@ -1216,11 +1171,23 @@ public class OrderScreen extends LinearLayout {
         dLp.topMargin = dp(3);
         texts.addView(desc, dLp);
 
-        TextView sales = Ui.tv(act, "月销 " + it.monthly + " · ❤" + it.price, 10, Ui.SUB, false);
+        LinearLayout metaRow = Ui.horizontal(act);
+        metaRow.setGravity(Gravity.CENTER_VERTICAL);
+        metaRow.addView(Ui.tv(act, "月销 " + it.monthly + " · ❤" + it.price,
+                10, Ui.SUB, false));
+        if (it.hasSpecs()) {
+            TextView specTag = Ui.pill(act, "选规格", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                    9f, 8, 2, true);
+            LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            spLp.leftMargin = dp(6);
+            metaRow.addView(specTag, spLp);
+        }
         LinearLayout.LayoutParams saLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         saLp.topMargin = dp(3);
-        texts.addView(sales, saLp);
+        texts.addView(metaRow, saLp);
 
         row.addView(texts);
 
@@ -1684,7 +1651,10 @@ public class OrderScreen extends LinearLayout {
         int n = 1 + random.nextInt(2);
         for (int i = 0; i < n; i++) {
             Menu.Item it = all.get(random.nextInt(all.size()));
-            addToCart(it.name, 1);
+            // 有规格的随机挑一个规格，别把"没选规格"的菜塞进购物车
+            String spec = it.hasSpecs()
+                    ? it.specs.get(random.nextInt(it.specs.size())) : "";
+            addToCartSpec(it.name, spec, 1);
         }
         toast("帮你随便点了点～");
     }
@@ -1736,7 +1706,8 @@ public class OrderScreen extends LinearLayout {
             return;
         }
         box.removeAllViews();
-        int qty = cart.containsKey(name) ? cart.get(name) : 0;
+        // 同一种菜可能散在多个规格行里，这里显示的是**总份数**
+        int qty = com.couple.xiaowo.core.CartKey.totalQty(cart, name);
         if (qty > 0) {
             TextView minus = tinyCircle("−", 0xFFF2EEFB, Ui.PURPLE_DEEP, 24, 15);
             minus.setOnClickListener(new OnClickListener() {
@@ -1753,7 +1724,7 @@ public class OrderScreen extends LinearLayout {
             TextView plus = tinyCircle("+", Ui.PURPLE, 0xFFFFFFFF, 28, 16);
             plus.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
-                    addToCart(name, 1);
+                    plusFor(name);
                 }
             });
             box.addView(plus);
@@ -1761,17 +1732,70 @@ public class OrderScreen extends LinearLayout {
             TextView plus = tinyCircle("+", 0xFFEDE7FB, Ui.PURPLE_DEEP, 30, 18);
             plus.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
-                    addToCart(name, 1);
+                    plusFor(name);
                 }
             });
             box.addView(plus);
         }
     }
+
+    /**
+     * 点「+」：有规格的菜先弹选择，没规格的直接加一份。
+     *
+     * 为什么每次加都弹：规格之间可以同时点（"脸颊"和"嘴巴"都要），
+     * 记住"上次选的"反而会让用户点错还没发觉。
+     */
+    private void plusFor(String name) {
+        Menu.Item it = byName.get(name);
+        if (it == null) {
+            return;
+        }
+        if (!it.hasSpecs()) {
+            addToCart(name, 1);
+            return;
+        }
+        showSpecPicker(it, null);
+    }
+
+    /**
+     * 规格选择弹窗。
+     *
+     * @param defaultSpec 预选中的规格（null 表示不预选）
+     */
+    private void showSpecPicker(final Menu.Item it, String defaultSpec) {
+        LinearLayout box = Ui.vertical(act);
+        box.setPadding(dp(6), dp(4), dp(6), dp(4));
+
+        box.addView(Ui.tv(act, "选一个" + it.name + "的规格", 12.5f, Ui.TEXT, true));
+        box.addView(Ui.tv(act, it.desc, 10.5f, Ui.TEXT_MUTED, false), top(4));
+
+        // 每个规格一行，点了直接加进购物车并关掉弹窗
+        final Dialog[] dlgRef = new Dialog[1];
+        for (final String sp : it.specs) {
+            TextView row = Ui.pill(act, sp, 0xFFF7F5FA, Ui.TEXT, 12.5f, 14, 10, false);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams rLp = top(6);
+            row.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    addToCartSpec(it.name, sp, 1);
+                    Dialog d = dlgRef[0];
+                    if (d != null) {
+                        d.dismiss();
+                    }
+                    toastOk("已加「" + it.name + "·" + sp + "」");
+                }
+            });
+            box.addView(row, rLp);
+        }
+        dlgRef[0] = DialogKit.custom(act, "选规格", box, "取消", null);
+    }
     private void reorder(History.Entry e) {
         cart.clear();
         for (Protocol.Line l : e.lines) {
             if (byName.containsKey(l.name)) {
-                cart.put(l.name, l.qty);
+                String k = com.couple.xiaowo.core.CartKey.of(l.name, l.spec);
+                int prev = cart.containsKey(k) ? cart.get(k) : 0;
+                cart.put(k, prev + l.qty);
             }
         }
         for (String k : new ArrayList<String>(actionBoxes.keySet())) {
@@ -1940,7 +1964,7 @@ public class OrderScreen extends LinearLayout {
         int total = 0;
         int count = 0;
         for (Map.Entry<String, Integer> e : cart.entrySet()) {
-            Menu.Item it = byName.get(e.getKey());
+            Menu.Item it = byName.get(com.couple.xiaowo.core.CartKey.nameOf(e.getKey()));
             if (it == null) {
                 continue;
             }
@@ -2142,6 +2166,14 @@ public class OrderScreen extends LinearLayout {
         desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         box.addView(desc, top(8));
 
+        final EditText specs = new EditText(act);
+        specs.setHint("规格，用顿号或逗号分开（可留空）");
+        specs.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        box.addView(specs, top(8));
+        box.addView(Ui.tv(act,
+                "例：微辣、中辣、特辣 — 点了这道菜时，对方会先选一个规格",
+                9.5f, Ui.TEXT_MUTED, false), top(3));
+
         final int[] cat = {0};
         LinearLayout cats = Ui.horizontal(act);
         final List<ImageView> ivs = new ArrayList<ImageView>();
@@ -2182,6 +2214,7 @@ public class OrderScreen extends LinearLayout {
                 Menu.Item it = new Menu.Item(nm, p, cat[0],
                         emoji.getText().toString().trim(),
                         desc.getText().toString().trim(), 5.0f, 0, true);
+                addSpecs(it, specs.getText().toString());
                 Menu.CATEGORIES.get(0).items.add(it);
                 byName.put(nm, it);
                 saveMenuToDisk();
@@ -2212,6 +2245,13 @@ public class OrderScreen extends LinearLayout {
         desc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         box.addView(desc, top(8));
 
+        final EditText specs = new EditText(act);
+        specs.setText(joinSpecs(it));
+        specs.setHint("规格，用顿号或逗号分开（可留空）");
+        specs.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        box.addView(specs, top(8));
+        box.addView(Ui.tv(act, "多个规格用顿号、逗号或空格分开", 9.5f, Ui.TEXT_MUTED, false), top(3));
+
         DialogKit.custom(act, "改「" + it.name + "」", box, "保存", new Runnable() {
             public void run() {
                 String nm = name.getText().toString().trim();
@@ -2226,16 +2266,55 @@ public class OrderScreen extends LinearLayout {
                 byName.remove(it.name);
                 it.name = nm;
                 it.desc = desc.getText().toString().trim();
+                it.specs.clear();
+                addSpecs(it, specs.getText().toString());
                 byName.put(nm, it);
                 saveMenuToDisk();
                 if (stamp != null) {
                     stamp.setText("共 " + Menu.totalCount() + " 道");
                 }
+                /*
+                 * 厨房页也要失效重画 —— 规格改了之后，那道菜那行
+                 * 的「选规格」标记要不要显示会变（从无规格变成有规格）。
+                 * 只清 TAB_MANAGE 的话，厨房列表还是旧的。
+                 */
+                pages[TAB_KITCHEN] = null;
                 pages[TAB_MANAGE] = null;
+                rebuildList();
                 switchTab(TAB_MANAGE);
                 toastOk("已保存，记得推送给张老师");
             }
         });
+    }
+
+    /**
+     * 解析用户填的规格串。
+     *
+     * 容忍多种分隔符（顿号/中英文逗号/空格/分号），
+     * 因为没人会记得"这里要用什么符号"。
+     */
+    private void addSpecs(Menu.Item it, String raw) {
+        if (raw == null) {
+            return;
+        }
+        for (String part : raw.split("[\u3001,\uFF0C;\uFF1B/\\s]+")) {
+            String sp = part.trim();
+            if (sp.length() > 0 && sp.length() <= 12 && !it.specs.contains(sp)) {
+                it.specs.add(sp);
+            }
+        }
+    }
+
+    /** 规格列表 → 编辑框里的文本 */
+    private String joinSpecs(Menu.Item it) {
+        StringBuilder sb = new StringBuilder();
+        for (String sp : it.specs) {
+            if (sb.length() > 0) {
+                sb.append('、');
+            }
+            sb.append(sp);
+        }
+        return sb.toString();
     }
 
     private void pushMenuToPeer(final TextView stamp) {

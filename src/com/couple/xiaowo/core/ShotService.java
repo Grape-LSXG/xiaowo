@@ -48,8 +48,19 @@ public class ShotService extends AccessibilityService {
     /** 当前已连接的服务实例；null 表示用户没开无障碍 */
     private static volatile ShotService instance;
 
-    /** 正在等待结果的一次截屏请求 */
-    private static volatile Shot.Result pending;
+    /**
+     * 正在等待结果的那一次截屏请求。
+     *
+     * 用**锁 + 引用**而不是纯 volatile：系统允许并发调用 takeScreenshot，
+     * 但一次 interceptor 回调没法区分"这个结果是哪个请求的"。
+     * 如果两个请求同时进来（用户连点两次「看屏幕」、或者中转和直连同时触发），
+     * 后一个会把 pending 覆盖掉，前一个的 latch 永远不会 countDown，
+     * 只能干等到超时 —— 表现就是"偶尔截图特别慢/失败"。
+     *
+     * 所以这里串行化：一次只允许一个请求在飞。
+     */
+    private static final Object LOCK = new Object();
+    private static Shot.Result pending;
 
     public static boolean isReady() {
         return instance != null;
@@ -93,6 +104,16 @@ public class ShotService extends AccessibilityService {
     public void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
+        // 服务重连时，把上一轮卡住的请求放掉，别让它干等
+        Shot.Result stuck;
+        synchronized (LOCK) {
+            stuck = pending;
+            pending = null;
+        }
+        if (stuck != null) {
+            stuck.error = "截屏服务已重连，请重试";
+            stuck.done.countDown();
+        }
     }
 
     @Override
@@ -107,6 +128,15 @@ public class ShotService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         instance = null;
+        Shot.Result stuck;
+        synchronized (LOCK) {
+            stuck = pending;
+            pending = null;
+        }
+        if (stuck != null) {
+            stuck.error = "截屏服务已断开";
+            stuck.done.countDown();
+        }
         return super.onUnbind(intent);
     }
 
@@ -134,13 +164,27 @@ public class ShotService extends AccessibilityService {
             out.done.countDown();
             return;
         }
-        pending = out;
+        // 串行化：抢不到就说明已经有一个在飞了
+        synchronized (LOCK) {
+            if (pending != null) {
+                out.error = "已有一次截屏在进行中";
+                out.done.countDown();
+                return;
+            }
+            pending = out;
+        }
+        /*
+         * 把本次请求的引用闭包进来。
+         *
+         * 回调里**不能**去读全局 pending —— 那个值可能已经被清空或被后续请求替换。
+         * 闭包捕获的 target 才是"这次请求的身份"。
+         */
+        final Shot.Result target = out;
         try {
             svc.takeScreenshot(android.view.Display.DEFAULT_DISPLAY,
                     svc.getMainExecutor(), new TakeScreenshotCallback() {
                         @Override
                         public void onSuccess(ScreenshotResult result) {
-                            Shot.Result target = pending;
                             if (target == null) {
                                 // 不是我们发的请求（例如系统别的调用），忽略
                                 if (result != null && result.getHardwareBuffer() != null) {
@@ -169,25 +213,33 @@ public class ShotService extends AccessibilityService {
                                 } catch (Exception ignore) {
                                 }
                             }
-                            pending = null;
+                            clearPending(target);
                             target.done.countDown();
                         }
 
                         @Override
                         public void onFailure(int errorCode) {
-                            Shot.Result target = pending;
                             if (target != null) {
                                 target.error = "系统拒绝截屏，code=" + errorCode
                                         + "（1 表示系统正在截屏，稍后再试）";
-                                pending = null;
-                                target.done.countDown();
                             }
+                            clearPending(target);
+                            target.done.countDown();
                         }
                     });
         } catch (Throwable t) {
             out.error = "发起截屏失败：" + t;
-            pending = null;
+            clearPending(target);
             out.done.countDown();
+        }
+    }
+
+    /** 只清掉属于自己的 pending，避免误伤后来者 */
+    private static void clearPending(Shot.Result mine) {
+        synchronized (LOCK) {
+            if (pending == mine) {
+                pending = null;
+            }
         }
     }
 }

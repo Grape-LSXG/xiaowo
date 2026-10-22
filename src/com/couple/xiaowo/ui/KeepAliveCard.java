@@ -97,173 +97,264 @@ public final class KeepAliveCard {
     // ------------------------------------------------------------------ UI
 
     public static View build(final Activity act, final boolean isRecv) {
+        ItemHolder holder = new ItemHolder();
+
         LinearLayout card = Ui.vertical(act);
         card.setBackground(Ui.round(Ui.CARD, dp(act, Ui.R_CARD)));
         card.setPadding(dp(act, 14), dp(act, 14), dp(act, 14), dp(act, 12));
         card.setElevation(dp(act, 2f));
+        holder.card = card;
 
-        // ---- 标题 + 不关闭的说明 ----
+        // ---- 标题 ----
         LinearLayout head = Ui.horizontal(act);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        head.addView(Ui.tv(act, "🔋 后台保活", 14, Ui.TEXT, true));
+        head.addView(Ui.tv(act, "🛡 运行权限", 14, Ui.TEXT, true));
         head.addView(new View(act), new LinearLayout.LayoutParams(0, 1, 1f));
-        TextView always = Ui.pill(act, "始终开启", Ui.SUCCESS_SOFT, Ui.SUCCESS,
-                10f, 10, 3, true);
-        head.addView(always);
+        holder.badge = Ui.pill(act, "检查中", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 10f, 10, 3, true);
+        head.addView(holder.badge);
         card.addView(head);
 
-        card.addView(Ui.tv(act,
-                "这一项没有开关 —— 因为关掉它不是「省点资源」，而是直接让 App 收不到。\n"
-                        + "实测：保活一停，接单端退到后台几秒，监听端口就不再应答，"
-                        + "对方只会一直超时报「没连上」。所以它默认开、自动维持、不能关。",
-                10.5f, Ui.TEXT_SUB, false), top(act, 6));
+        holder.subtitle = Ui.tv(act, "正在检查各项权限…", 10.5f, Ui.TEXT_SUB, false);
+        card.addView(holder.subtitle, top(act, 6));
 
-        // ---- 状态清单 ----
-        card.addView(sectionTitle(act, "现在的状态"), top(act, 12));
+        // ---- 权限清单（每行一个缺口，全部就绪时整块隐藏）----
+        holder.rowsBox = Ui.vertical(act);
+        card.addView(holder.rowsBox, top(act, 10));
 
-        // 1) 前台服务（可刷新：sync 之后状态会变）
-        final LinearLayout[] svcRow = new LinearLayout[1];
-        svcRow[0] = stateRow(act, "…", "保活前台服务", "正在检查…", Ui.TEXT_MUTED);
-        card.addView(svcRow[0], top(act, 6));
-        Runnable refreshSvc = new Runnable() {
-            public void run() {
-                boolean svc = Keep.serviceRunning(act);
-                stateRowUpdate(act, svcRow[0], svc ? "✅" : "⚠️",
-                        "保活前台服务",
-                        svc ? "正在运行，常驻通知已挂上"
-                                : "没在跑 —— 已尝试重新拉起，若一直这样请检查通知权限",
-                        svc ? Ui.SUCCESS : Ui.WARN);
-            }
-        };
-        registerRefresh(refreshSvc);
-        refreshSvc.run();
-
-        // 2) 一像素窗
-        boolean overlay = PixelKeeper.canOverlay(act);
-        boolean pixelRunning = PixelKeeper.isRunning();
-        LinearLayout row2 = stateRow(act, pixelRunning ? "✅" : (overlay ? "⏳" : "⚠️"),
-                "屏幕边缘常驻（1 像素）",
-                pixelRunning ? "已立起来，进程不会被当后台冻结"
-                        : (overlay ? "权限有了，正在拉起"
-                        : "缺「显示在其他应用上层」权限，点这里去开"),
-                pixelRunning ? Ui.SUCCESS : (overlay ? Ui.TEXT_MUTED : Ui.WARN));
-        if (!pixelRunning && !overlay) {
-            row2.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    Keep.goOverlay(act);
-                    Toast2.warn(act, "先允许「显示在其他应用上层」，回来就自动生效");
-                }
-            });
-        }
-        card.addView(row2, top(act, 6));
-
-        // 3) 无障碍权限 —— 只有点单端有这一项（接单端不需要，也没这个能力）
-        if (BuildInfo.IS_ORDER) {
-            boolean shotOk = ShotService.isReady();
-            boolean shotEnabled = ShotService.isEnabledInSettings(act);
-            boolean lowApi = Build.VERSION.SDK_INT < 30;
-            LinearLayout row3 = stateRow(act, shotOk ? "✅" : (shotEnabled ? "⏳" : "⚠️"),
-                    "无障碍权限",
-                    lowApi ? "系统低于 Android 11，只能用 App 内截图"
-                            : (shotOk ? "已开启"
-                            : (shotEnabled ? "已授权，正在连接…"
-                            : "未开启，点这里去开启")),
-                    shotOk ? Ui.SUCCESS : (lowApi ? Ui.TEXT_MUTED : Ui.WARN));
-            if (!shotOk && !lowApi) {
-                row3.setOnClickListener(new View.OnClickListener() {
-                    public void onClick(View v) {
-                        Keep.goShot(act);
-                        Toast2.warn(act, "请启用必要权限以保证软件正常运行");
+        holder.fixAll = Ui.primaryButton(act, "去开启");
+        holder.fixAll.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        goNextMissing(act);
                     }
                 });
             }
-            card.addView(row3, top(act, 6));
-        }
+        });
+        card.addView(holder.fixAll, top(act, 12));
 
-        // 4) 通知权限
-        boolean notif = AlertCenter.SystemNotify.hasPermission(act);
-        card.addView(stateRow(act, notif ? "✅" : "⚠️",
-                "通知权限",
-                notif ? "已允许，通知能正常弹出"
-                        : "没开 —— 保活通知也发不出来，保活会打折扣",
-                notif ? Ui.SUCCESS : Ui.WARN), top(act, 6));
-
-        // ---- 一键补权限 ----
-        boolean shotNeeded = Build.VERSION.SDK_INT >= 30 && BuildInfo.IS_ORDER
-                && !ShotService.isReady();
-        if (!overlay || shotNeeded || !notif) {
-            TextView fixAll = Ui.primaryButton(act, "一键补齐权限");
-            fixAll.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    if (!PixelKeeper.canOverlay(act)) {
-                        Keep.goOverlay(act);
-                        return;
-                    }
-                    if (Build.VERSION.SDK_INT >= 30 && BuildInfo.IS_ORDER
-                            && !ShotService.isReady()) {
-                        Keep.goShot(act);
-                        return;
-                    }
-                    if (!AlertCenter.SystemNotify.hasPermission(act)) {
-                        AlertCenter.SystemNotify.request(act);
-                        return;
-                    }
-                    Toast2.ok(act, "都齐了");
-                }
-            });
-            card.addView(fixAll, top(act, 12));
-        } else {
-            // 这句必须是**动态**的：sync 之前服务还没起，不能提前宣布"就绪"
-            final TextView okPill = Ui.pill(act, "检查中…", Ui.SUCCESS_SOFT,
-                    Ui.SUCCESS, 11.5f, 12, 8, true);
-            card.addView(okPill, top(act, 12));
-            registerRefresh(new Runnable() {
-                public void run() {
-                    boolean svcNow = Keep.serviceRunning(act);
-                    boolean pixelNow = PixelKeeper.isRunning();
-                    boolean shotNow = !BuildInfo.IS_ORDER
-                            || Build.VERSION.SDK_INT < 30
-                            || ShotService.isReady()
-                            || ShotService.isEnabledInSettings(act);
-                    boolean notifNow = AlertCenter.SystemNotify.hasPermission(act);
-                    if (svcNow && pixelNow && shotNow && notifNow) {
-                        okPill.setText("✅ 所有保活手段都就绪");
-                    } else {
-                        okPill.setText("还没齐 —— 上面标 ⚠️ 的项点一下去补");
-                    }
-                }
-            });
-        }
-
-        // ---- 提醒程度联动 ----
-        if (RemindSettings.level(act) >= Remind.OVERLAY && !AlertCenter.canOverlay(act)) {
-            TextView fix = Ui.pill(act, "⚠ 提醒选了「悬浮窗」，但还没授权 → 去开启",
-                    Ui.WARN_SOFT, Ui.WARN, 11.5f, 14, 8, true);
-            fix.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    AlertCenter.requestOverlay(act);
-                }
-            });
-            card.addView(fix, top(act, 10));
-        }
-
-        // ---- vivo/小米 专属 ----
-        card.addView(sectionTitle(act, "厂商后台限制（只能手动开）"), top(act, 12));
-        card.addView(Ui.tv(act,
-                "vivo / 小米 / OPPO 在系统层还有几个白名单开关，任何 App 都没法静默打开：\n"
-                        + "· 自启动（开机/被清后能自己起来）\n"
-                        + "· 允许后台高耗电（后台持续联网）\n"
-                        + "· 锁屏显示 / 后台弹出界面（锁屏也能提醒）",
-                9.5f, Ui.TEXT_MUTED, false), top(act, 4));
-        TextView goSys = Ui.secondaryButton(act, "去系统设置开这些");
-        goSys.setOnClickListener(new View.OnClickListener() {
+        // ---- 系统设置入口：只在有缺口时才出现 ----
+        holder.moreRow = Ui.pill(act, "还有系统级设置需要确认 →", Ui.TEXT_MUTED,
+                Ui.TEXT_SUB, 10.5f, 12, 6, false);
+        holder.moreRow.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 Keep.goAppDetail(act);
             }
         });
-        card.addView(goSys, top(act, 8));
+        card.addView(holder.moreRow, top(act, 6));
+
+        // ---- 全部就绪时显示的紧凑一行 ----
+        holder.okRow = Ui.pill(act, "✅ 运行权限已就绪", Ui.SUCCESS_SOFT,
+                Ui.SUCCESS, 11.5f, 12, 8, true);
+        card.addView(holder.okRow);
+
+        // ---- 首次引导：提示改成允许后台高耗电（每台设备只提一次）----
+        holder.hintBox = Ui.vertical(act);
+        card.addView(holder.hintBox);
+
+        Runnable refresh = new Runnable() {
+            public void run() {
+                refreshCard(act, holder);
+            }
+        };
+        registerRefresh(refresh);
+        holder.selfRefresh = refresh;
+        refresh.run();
 
         return card;
+    }
+
+    /** build() 里用到的可变引用集合，避免 lambda 捕获 final 限制 */
+    private static final class ItemHolder {
+        LinearLayout card;
+        TextView badge;
+        TextView subtitle;
+        LinearLayout rowsBox;
+        TextView fixAll;
+        TextView moreRow;
+        TextView okRow;
+        LinearLayout hintBox;
+        Runnable selfRefresh;
+    }
+
+    /**
+     * 把卡片刷成"当前真实状态"。
+     *
+     * 设计原则（按需求）：
+     *   · 不描述任何具体手段 —— 不提常驻通知、窗口、服务这些词
+     *   · 只讲"缺什么权限、开了有什么好处"
+     *   · 全部就绪时，清单和按钮整体收起，只留一行"已就绪"
+     */
+    private static void refreshCard(final Activity act, final ItemHolder h) {
+        if (act == null || act.isFinishing()) {
+            return;
+        }
+        boolean overlayOk = PixelKeeper.canOverlay(act);
+        boolean notifOk = AlertCenter.SystemNotify.hasPermission(act);
+        boolean batteryOk = Keep.isIgnoringBattery(act);
+        boolean shotOk = !BuildInfo.IS_ORDER
+                || Build.VERSION.SDK_INT < 30
+                || ShotService.isReady()
+                || ShotService.isEnabledInSettings(act);
+        boolean oemOk = Keep.oemGuideConfirmed(act);
+
+        h.rowsBox.removeAllViews();
+
+        int missing = 0;
+        if (!overlayOk) {
+            missing++;
+            h.rowsBox.addView(missingRow(act, "显示在其他应用上层",
+                    "用于在你看不到的时候也能收到提醒"), top(act, 6));
+            h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
+                    .setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
+                            Keep.goOverlay(act);
+                        }
+                    });
+        }
+        if (!notifOk) {
+            missing++;
+            h.rowsBox.addView(missingRow(act, "通知",
+                    "对方发来的消息和提醒才能显示出来"), top(act, 6));
+            h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
+                    .setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
+                            AlertCenter.SystemNotify.request(act);
+                        }
+                    });
+        }
+        if (!batteryOk) {
+            missing++;
+            h.rowsBox.addView(missingRow(act, "电池优化",
+                    "允许以后，长时间放着也不会掉线"), top(act, 6));
+            h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
+                    .setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
+                            Keep.requestIgnoreBattery(act);
+                        }
+                    });
+        }
+        if (BuildInfo.IS_ORDER && Build.VERSION.SDK_INT >= 30 && !shotOk) {
+            missing++;
+            h.rowsBox.addView(missingRow(act, "无障碍",
+                    "对方想看你这边时可以自动完成"), top(act, 6));
+            h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
+                    .setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
+                            Keep.goShot(act);
+                        }
+                    });
+        }
+        if (!oemOk) {
+            missing++;
+            h.rowsBox.addView(missingRow(act, "后台运行",
+                    "系统里允许后台高耗电后更稳定"), top(act, 6));
+            h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
+                    .setOnClickListener(new View.OnClickListener() {
+                        public void onClick(View v) {
+                            Keep.goAppDetail(act);
+                        }
+                    });
+        }
+
+        if (missing == 0) {
+            // 全部就绪：清单/按钮/说明全部收起，只留一行结论
+            h.rowsBox.setVisibility(View.GONE);
+            h.fixAll.setVisibility(View.GONE);
+            h.moreRow.setVisibility(View.GONE);
+            h.hintBox.setVisibility(View.GONE);
+            h.okRow.setVisibility(View.VISIBLE);
+            h.badge.setText("已完成");
+            h.badge.setBackground(Ui.round(Ui.SUCCESS_SOFT, dp(act, 999)));
+            h.badge.setTextColor(Ui.SUCCESS);
+            h.subtitle.setVisibility(View.GONE);
+            return;
+        }
+
+        h.rowsBox.setVisibility(View.VISIBLE);
+        h.okRow.setVisibility(View.GONE);
+        h.badge.setText(missing + " 项待确认");
+        h.badge.setBackground(Ui.round(Ui.WARN_SOFT, dp(act, 999)));
+        h.badge.setTextColor(Ui.WARN);
+        h.subtitle.setVisibility(View.VISIBLE);
+        h.subtitle.setText("开启下面这些之后，即使不打开 App 也能正常收到消息。");
+
+        h.fixAll.setVisibility(View.VISIBLE);
+        h.fixAll.setText("去开启");
+
+        h.moreRow.setVisibility(View.VISIBLE);
+
+        // 首次进入且电池优化没开：多给一句明确的厂商提示
+        h.hintBox.removeAllViews();
+        if (!batteryOk && !Keep.batteryHintShown(act)) {
+            /*
+             * 这里**不**立即置位。
+             *
+             * 原来一显示提示就把标记写死了 —— 用户如果只是看了一眼、
+             * 没有点「去开启」，之后永远不会再被提醒，
+             * 而"第一次要提示用户改为允许后台高耗电"这件事就没做到。
+             *
+             * 改成：只有真的点了（跳去系统设置时）才标记。
+             */
+            TextView hint = Ui.pill(act,
+                    "在系统设置里把本应用改为「允许后台高耗电」，会更稳定",
+                    Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 10.5f, 12, 6, false);
+            // 点击落在 pill 上（容器本身不一定可点），并且真要跳才标记已提示
+            hint.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    Keep.markBatteryHintShown(act);
+                    Keep.goAppDetail(act);
+                }
+            });
+            h.hintBox.addView(hint, top(act, 8));
+            h.hintBox.setVisibility(View.VISIBLE);
+        } else {
+            h.hintBox.setVisibility(View.GONE);
+        }
+    }
+
+    /** 缺权限的一行：标题 + 一句"开了有什么用" */
+    private static LinearLayout missingRow(Activity act, String title, String hint) {
+        LinearLayout row = Ui.horizontal(act);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(act, 11), dp(act, 10), dp(act, 11), dp(act, 10));
+        row.setBackground(Ui.round(0xFFF7F5FA, dp(act, 13)));
+
+        row.addView(Ui.tv(act, "⚠️", 12.5f, Ui.WARN, false));
+
+        LinearLayout col = Ui.vertical(act);
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        cLp.weight = 1f;
+        cLp.leftMargin = dp(act, 9);
+        col.setLayoutParams(cLp);
+        col.addView(Ui.tv(act, title, 12.5f, Ui.TEXT, true));
+        col.addView(Ui.tv(act, hint, 9.5f, Ui.TEXT_SUB, false), top(act, 2));
+        row.addView(col);
+
+        row.addView(Ui.tv(act, "›", 15, Ui.TEXT_MUTED, false));
+        return row;
+    }
+
+    /** 依次去补下一个缺口 */
+    private static void goNextMissing(Activity act) {
+        if (!PixelKeeper.canOverlay(act)) {
+            Keep.goOverlay(act);
+            return;
+        }
+        if (!AlertCenter.SystemNotify.hasPermission(act)) {
+            AlertCenter.SystemNotify.request(act);
+            return;
+        }
+        if (!Keep.isIgnoringBattery(act)) {
+            Keep.requestIgnoreBattery(act);
+            return;
+        }
+        if (BuildInfo.IS_ORDER && Build.VERSION.SDK_INT >= 30 && !ShotService.isReady()) {
+            Keep.goShot(act);
+            return;
+        }
+        Keep.goAppDetail(act);
     }
 
     // ------------------------------------------------------------------ 小构件
@@ -272,9 +363,19 @@ public final class KeepAliveCard {
         return Ui.tv(act, text, 10.5f, Ui.TEXT_MUTED, true);
     }
 
-    /** 本进程里所有已建好的卡片状态行，供 sync 之后刷新 */
-    private static final java.util.List<Runnable> REFRESHERS =
-            new java.util.ArrayList<Runnable>();
+    /**
+     * 本进程里所有已建好的卡片刷新器。
+     *
+     * 存的是「弱引用」而不是 Runnable 本身：刷新器是匿名类，
+     * 内部捕获了 Activity 和卡片里的 View。如果这里是强引用，
+     * 每次 Activity 重建（主题切换、授权返回、旋转）都会留下一个
+     * 指向已销毁界面的刷新器 —— 静态集合永不释放，就是典型泄漏。
+     *
+     * 用 WeakReference 包一层后，Activity 被回收时刷新器自然失效，
+     * refreshAll 里 get() 拿不到就跳过。
+     */
+    private static final java.util.List<java.lang.ref.WeakReference<Runnable>> REFRESHERS =
+            new java.util.ArrayList<java.lang.ref.WeakReference<Runnable>>();
 
     /**
      * 把已建好的卡片状态刷成当前真实值。
@@ -287,11 +388,22 @@ public final class KeepAliveCard {
      * 这里在 sync 之后回调一次，让界面收敛到真实状态。
      */
     public static void refreshAll() {
-        java.util.List<Runnable> copy;
+        java.util.List<java.lang.ref.WeakReference<Runnable>> copy;
         synchronized (REFRESHERS) {
-            copy = new java.util.ArrayList<Runnable>(REFRESHERS);
+            copy = new java.util.ArrayList<java.lang.ref.WeakReference<Runnable>>(REFRESHERS);
+            // 顺手清掉已经失效的，别让列表只增不减
+            java.util.Iterator<java.lang.ref.WeakReference<Runnable>> it = REFRESHERS.iterator();
+            while (it.hasNext()) {
+                if (it.next().get() == null) {
+                    it.remove();
+                }
+            }
         }
-        for (Runnable r : copy) {
+        for (java.lang.ref.WeakReference<Runnable> ref : copy) {
+            Runnable r = ref.get();
+            if (r == null) {
+                continue;
+            }
             try {
                 r.run();
             } catch (Exception ignore) {
@@ -300,12 +412,21 @@ public final class KeepAliveCard {
     }
 
     private static void registerRefresh(Runnable r) {
+        if (r == null) {
+            return;
+        }
         synchronized (REFRESHERS) {
-            // 同一进程里最多几份卡片，限制一下避免 Activity 重建后无限增长
+            // 除了清掉失效项，也给一个上限兜底（重建很频繁时）
+            java.util.Iterator<java.lang.ref.WeakReference<Runnable>> it = REFRESHERS.iterator();
+            while (it.hasNext()) {
+                if (it.next().get() == null) {
+                    it.remove();
+                }
+            }
             if (REFRESHERS.size() > 12) {
                 REFRESHERS.clear();
             }
-            REFRESHERS.add(r);
+            REFRESHERS.add(new java.lang.ref.WeakReference<Runnable>(r));
         }
     }
 

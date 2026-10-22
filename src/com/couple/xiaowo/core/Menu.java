@@ -21,6 +21,14 @@ public final class Menu {
         public int monthly;          // 月销
         /** 用户自己加的菜（可以删） */
         public boolean custom;
+        /**
+         * 可选规格。空表示这道菜没有规格可选（点的时候直接加进购物车）。
+         *
+         * 为什么放在 Item 上而不是单独建表：
+         * 规格是"这道菜怎么点"的一部分，跟着菜走最自然 ——
+         * 菜谱同步、自定义菜、持久化都只需要多带一个数组。
+         */
+        public final java.util.List<String> specs = new java.util.ArrayList<String>();
 
         public Item(String name, int price, int cat, String emoji, String desc,
                     float rating, int monthly) {
@@ -40,23 +48,40 @@ public final class Menu {
         }
 
         public String toJson() {
+            java.util.List<String> specParts = new java.util.ArrayList<String>();
+            for (String sp : specs) {
+                specParts.add(Json.quote(sp));
+            }
             return Json.object(Json.fields(
                     "name", Json.quote(name),
                     "price", String.valueOf(price),
                     "cat", String.valueOf(cat),
                     "emoji", Json.quote(emoji),
                     "desc", Json.quote(desc),
+                    "specs", Json.array(specParts),
                     "from", Json.quote("猫猫")));
         }
 
         public static Item fromJson(java.util.Map<String, Object> m) {
-            return new Item(
+            Item it = new Item(
                     Json.str(m, "name", ""),
                     (int) Json.num(m, "price", 0),
                     (int) Json.num(m, "cat", 0),
                     Json.str(m, "emoji", "🐾"),
                     Json.str(m, "desc", ""),
                     5.0f, 0, false);
+            for (Object o : Json.list(m, "specs")) {
+                String sp = String.valueOf(o);
+                if (sp != null && sp.length() > 0) {
+                    it.specs.add(sp);
+                }
+            }
+            return it;
+        }
+
+        /** 有没有可选规格 */
+        public boolean hasSpecs() {
+            return !specs.isEmpty();
         }
     }
 
@@ -88,42 +113,74 @@ public final class Menu {
         c.items.add(new Item(name, price, cat, emoji, desc, 5.0f, 0));
     }
 
+    /** 带规格的菜：点的时候要先选一个规格 */
+    private static void add(Category c, String name, int price, int cat, String emoji,
+                            String desc, String... specs) {
+        Item it = new Item(name, price, cat, emoji, desc, 5.0f, 0);
+        for (String sp : specs) {
+            it.specs.add(sp);
+        }
+        c.items.add(it);
+    }
+
     static {
         Category miss = new Category("想你了", "💗");
-        add(miss, "要亲亲", 5, 0, "💋", "现在、立刻、马上");
-        add(miss, "要抱抱", 5, 1, "🫂", "抱到不想松手那种");
-        add(miss, "要夸夸", 5, 2, "✨", "今天也要被夸好看");
-        add(miss, "陪陪我", 8, 3, "🐾", "什么都不做也行");
-        add(miss, "摸摸头", 3, 4, "🖐️", "顺毛，很轻的");
-        add(miss, "说晚安", 2, 5, "🌙", "睡前必须要的");
-        add(miss, "讲个笑话", 4, 6, "😹", "不好笑也要笑");
+        add(miss, "要亲亲", 5, 0, "💋", "现在、立刻、马上",
+                "额头", "脸颊", "嘴巴", "抱起来亲");
+        add(miss, "要抱抱", 5, 1, "🫂", "抱到不想松手那种",
+                "轻轻抱", "紧紧抱", "从背后抱", "抱起来转圈");
+        add(miss, "要夸夸", 5, 2, "✨", "今天也要被夸好看",
+                "夸好看", "夸可爱", "夸厉害", "夸我全对");
+        add(miss, "陪陪我", 8, 3, "🐾", "什么都不做也行",
+                "聊会儿天", "安静待着", "陪我看剧", "陪我发呆");
+        add(miss, "摸摸头", 3, 4, "🖐️", "顺毛，很轻的",
+                "顺着摸", "轻轻拍", "揉一揉", "摸到睡着");
+        add(miss, "说晚安", 2, 5, "🌙", "睡前必须要的",
+                "语音说", "打字说", "说完再睡", "陪我到睡着");
+        add(miss, "讲个笑话", 4, 6, "😹", "不好笑也要笑",
+                "冷笑话", "谐音梗", "你自己的糗事", "随你讲");
         CATEGORIES.add(miss);
 
         Category takeout = new Category("点外卖", "🧋");
-        add(takeout, "一杯奶茶", 12, 6, "🧋", "三分糖，去冰");
-        add(takeout, "炸鸡桶", 18, 7, "🍗", "罪恶但快乐");
-        add(takeout, "小蛋糕", 15, 2, "🍰", "就一小块");
-        add(takeout, "冰淇淋", 9, 0, "🍦", "天冷也要吃");
+        add(takeout, "一杯奶茶", 12, 6, "🧋", "三分糖，去冰",
+                "全糖", "七分糖", "半糖", "三分糖", "无糖", "常温", "少冰", "去冰");
+        add(takeout, "炸鸡桶", 18, 7, "🍗", "罪恶但快乐",
+                "原味", "香辣", "蜂蜜芥末", "一半一半");
+        add(takeout, "小蛋糕", 15, 2, "🍰", "就一小块",
+                "草莓", "巧克力", "抹茶", "芝士");
+        add(takeout, "冰淇淋", 9, 0, "🍦", "天冷也要吃",
+                "香草", "巧克力", "芒果", "双拼");
         CATEGORIES.add(takeout);
 
         Category doWhat = new Category("做什么", "🎬");
-        add(doWhat, "看电影", 20, 3, "🎬", "你选片我买票");
-        add(doWhat, "去散步", 5, 4, "🌿", "绕小区两圈");
-        add(doWhat, "一起打游戏", 10, 5, "🎮", "输了不许生气");
-        add(doWhat, "拍张合照", 6, 1, "📷", "今天也很好看");
+        add(doWhat, "看电影", 20, 3, "🎬", "你选片我买票",
+                "电影院", "在家看", "恐怖片", "爱情片", "动画片");
+        add(doWhat, "去散步", 5, 4, "🌿", "绕小区两圈",
+                "饭后走走", "绕小区", "去公园", "边走边聊");
+        add(doWhat, "一起打游戏", 10, 5, "🎮", "输了不许生气",
+                "合作过关", "互相打", "你带我", "随便玩");
+        add(doWhat, "拍张合照", 6, 1, "📷", "今天也很好看",
+                "正经的", "搞怪的", "十指相扣", "自拍一张");
         CATEGORIES.add(doWhat);
 
         Category mood = new Category("有情绪", "🥺");
-        add(mood, "哄哄我", 6, 7, "🥺", "我不说但你要懂");
-        add(mood, "撒个娇", 3, 1, "🌷", "就一下下");
-        add(mood, "求安慰", 4, 5, "🫧", "今天有点累");
-        add(mood, "委屈巴巴", 5, 4, "💧", "需要抱抱续命");
+        add(mood, "哄哄我", 6, 7, "🥺", "我不说但你要懂",
+                "要哄哄", "听抱怨", "你认错", "我认错", "想骂人");
+        add(mood, "撒个娇", 3, 1, "🌷", "就一下下",
+                "要抱抱", "要陪我", "要听好话", "就想闹一下");
+        add(mood, "求安慰", 4, 5, "🫧", "今天有点累",
+                "工作累", "心情差", "身体不舒服", "就想被照顾");
+        add(mood, "委屈巴巴", 5, 4, "💧", "需要抱抱续命",
+                "你凶我了", "忽略我了", "没回消息", "就是委屈");
         CATEGORIES.add(mood);
 
         Category money = new Category("不够花", "💰");
-        add(money, "零花钱", 30, 2, "💰", "自愿上交");
-        add(money, "想要个小礼物", 25, 6, "🎁", "不用很贵");
-        add(money, "清空购物车", 50, 0, "🛒", "这个有点过分");
+        add(money, "零花钱", 30, 2, "💰", "自愿上交",
+                "这周的", "这月的", "小额救急", "大额存着");
+        add(money, "想要个小礼物", 25, 6, "🎁", "不用很贵",
+                "吃的", "用的", "戴的", "你挑");
+        add(money, "清空购物车", 50, 0, "🛒", "这个有点过分",
+                "全部", "只清一件", "先看看", "等我想想");
         CATEGORIES.add(money);
     }
 
@@ -205,7 +262,16 @@ public final class Menu {
         for (Category c : CATEGORIES) {
             sb.append(c.name).append('|');
             for (Item it : c.items) {
-                sb.append(it.name).append(',').append(it.price).append(';');
+                /*
+                 * 必须把规格算进指纹。
+                 * 漏了它的话，用户只改规格（菜名价格都不变）时指纹不变，
+                 * 菜谱同步就不会触发 —— 对方永远收不到新加的规格。
+                 */
+                sb.append(it.name).append(',').append(it.price);
+                for (String sp : it.specs) {
+                    sb.append('/').append(sp);
+                }
+                sb.append(';');
             }
         }
         return Integer.toHexString(sb.toString().hashCode());

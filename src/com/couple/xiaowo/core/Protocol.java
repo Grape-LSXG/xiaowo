@@ -70,16 +70,34 @@ public final class Protocol {
         public int price = 0;
         public int cat = 0;          // 猫猫头像的配色/表情编号
         public String emoji = "";
+        /**
+         * 规格（可选）。空串表示这道菜没选规格。
+         *
+         * 为什么不做成数组：一单里同一种菜可以点两个不同规格
+         * （"要亲亲·脸颊"+"要亲亲·嘴巴"），做成"菜+规格"组合的一行更直观，
+         * 接单端按行显示也才看得懂到底要的是哪个。
+         */
+        public String spec = "";
 
         public Line() {
         }
 
         public Line(String name, int qty, int price, int cat, String emoji) {
+            this(name, qty, price, cat, emoji, "");
+        }
+
+        public Line(String name, int qty, int price, int cat, String emoji, String spec) {
             this.name = name;
             this.qty = qty;
             this.price = price;
             this.cat = cat;
             this.emoji = emoji;
+            this.spec = spec == null ? "" : spec;
+        }
+
+        /** 「菜名·规格」——界面上统一用这个显示 */
+        public String displayName() {
+            return spec.length() == 0 ? name : name + "·" + spec;
         }
 
         public int subtotal() {
@@ -106,7 +124,8 @@ public final class Protocol {
                         "qty", String.valueOf(l.qty),
                         "price", String.valueOf(l.price),
                         "cat", String.valueOf(l.cat),
-                        "emoji", Json.quote(l.emoji))));
+                        "emoji", Json.quote(l.emoji),
+                        "spec", Json.quote(l.spec))));
             }
             return Json.object(Json.fields(
                     "type", Json.quote(TYPE_ORDER),
@@ -128,7 +147,7 @@ public final class Protocol {
                 if (sb.length() > 0) {
                     sb.append("、");
                 }
-                sb.append(l.name);
+                sb.append(l.displayName());
                 if (l.qty > 1) {
                     sb.append(" ×").append(l.qty);
                 }
@@ -154,6 +173,7 @@ public final class Protocol {
                 Map<String, Object> im = Json.asObject(it);
                 Line l = new Line();
                 l.name = Json.str(im, "name", "");
+                l.spec = Json.str(im, "spec", "");
                 l.qty = (int) Json.num(im, "qty", 1);
                 l.price = (int) Json.num(im, "price", 0);
                 l.cat = (int) Json.num(im, "cat", 0);
