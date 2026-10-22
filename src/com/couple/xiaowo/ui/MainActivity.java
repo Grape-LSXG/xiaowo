@@ -205,6 +205,10 @@ public class MainActivity extends Activity implements HeartHost {
         if (KeepAliveCard.aliveEnabled(this) && com.couple.xiaowo.core.PixelKeeper.canOverlay(this)) {
             com.couple.xiaowo.core.PixelKeeper.start(this);
         }
+
+        // 启动时权限门：缺权限就不让用主界面。
+        // 放在 UI 建好之后调用，这样授权回来 recreate 时不会闪。
+        PermissionGate.ensure(this);
     }
 
     /**
@@ -332,6 +336,19 @@ public class MainActivity extends Activity implements HeartHost {
         super.onResume();
         if (ambient != null) {
             ambient.start();
+        }
+        /*
+         * 用户从授权页回来时再次检查权限。
+         * 全部就绪才放行；否则继续弹不可取消的引导框。
+         */
+        PermissionGate.ensure(this);
+
+        /*
+         * 授权悬浮窗回来后，把一像素保活窗拉起来。
+         * 这是"默认开启所有保活措施"的一部分 —— 用户一授权，保活就生效。
+         */
+        if (KeepAliveCard.aliveEnabled(this) && com.couple.xiaowo.core.PixelKeeper.canOverlay(this)) {
+            com.couple.xiaowo.core.PixelKeeper.start(this);
         }
         /*
          * AUTO 模式下再异步读一次光校正。
