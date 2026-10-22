@@ -160,15 +160,13 @@ public class OrderScreen extends LinearLayout {
         /*
          * 启动时先问 GitHub —— 这条路不依赖"接单端此刻在不在线"，
          * 是异地时唯一可靠的自动更新来源。
-         * 之后再尝试从接单端直连拿（同一个 Wi-Fi 时更快、也不走外网）。
+         * 默认开启（去掉开关），每次启动都检查，发现新版自动下载安装。
          */
-        if (com.couple.xiaowo.core.GithubRelease.enabled(act)) {
-            act.getWindow().getDecorView().postDelayed(new Runnable() {
-                public void run() {
-                    com.couple.xiaowo.ui.GitHubCard.run(act, false, null, null, false);
-                }
-            }, 1200);
-        }
+        act.getWindow().getDecorView().postDelayed(new Runnable() {
+            public void run() {
+                com.couple.xiaowo.ui.GitHubCard.run(act, false, null, null, false);
+            }
+        }, 1200);
         if (!PeerUpdateCard.autoEnabled(act)) {
             return;
         }
