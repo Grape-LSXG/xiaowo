@@ -36,6 +36,9 @@ public final class Protocol {
     public static final String TYPE_UPDATE_ACK = "updateAck";
     public static final String TYPE_BUZZ = "buzz";
     public static final String TYPE_HERE = "here";
+    public static final String TYPE_SYNC = "sync";
+    public static final String TYPE_SHOT = "shot";
+    public static final String TYPE_SHOT_IMG = "shotImg";
 
     public static final String PATH_ORDER = "/order";
     public static final String PATH_HEART = "/heart";
@@ -50,6 +53,10 @@ public final class Protocol {
     public static final String PATH_ACK_UPDATE = "/update/ack";
     /** 接单端 → 点单端：远程震动指令 */
     public static final String PATH_BUZZ = "/buzz";
+    /** 双向：订单记录 + 聊天记录同步 */
+    public static final String PATH_SYNC = "/sync";
+    /** 接单端 → 点单端：请求截图 */
+    public static final String PATH_SHOT = "/shot";
 
     private Protocol() {
     }
@@ -193,6 +200,24 @@ public final class Protocol {
                 "reason", Json.quote(reason),
                 "ms", String.valueOf(ms),
                 "fromName", Json.quote(from),
+                "ts", String.valueOf(System.currentTimeMillis())));
+    }
+
+    /** 接单端发起：请求点单端截屏 */
+    public static String shot(String from) {
+        return Json.object(Json.fields(
+                "type", Json.quote(TYPE_SHOT),
+                "role", Json.quote(ROLE_RECV),
+                "fromName", Json.quote(from),
+                "ts", String.valueOf(System.currentTimeMillis())));
+    }
+
+    /** 点单端回传：截图（base64） */
+    public static String shotImg(String base64) {
+        return Json.object(Json.fields(
+                "type", Json.quote(TYPE_SHOT_IMG),
+                "role", Json.quote(ROLE_ORDER),
+                "img", Json.quote(base64),
                 "ts", String.valueOf(System.currentTimeMillis())));
     }
 
