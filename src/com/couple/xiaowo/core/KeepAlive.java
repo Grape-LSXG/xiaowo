@@ -87,12 +87,20 @@ public final class KeepAlive extends Service {
         }
         startForeground(NOTIF_ID, buildNotification(this, role, hint));
         acquireWakeLock();
+        /*
+         * 一像素悬浮窗：这是"不用打开 App 也能收到"的关键。
+         * 只有前台通知时，系统仍会把 App 当后台冻结，网络回调被掐；
+         * 屏幕上有一个（哪怕不可见的）窗口，进程优先级就不一样了。
+         * 用户没给悬浮窗权限时 start() 会返回 false，此时退回纯前台服务。
+         */
+        PixelKeeper.start(this);
         // START_STICKY：被系统杀掉后尽量重启
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        PixelKeeper.stop();
         releaseWakeLock();
         super.onDestroy();
     }
