@@ -10,6 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.couple.xiaowo.core.KeepAlive;
+import com.couple.xiaowo.core.PixelKeeper;
 import com.couple.xiaowo.core.Protocol;
 import com.couple.xiaowo.core.Remind;
 
@@ -116,6 +117,48 @@ public final class KeepAliveCard {
                     }
                 }, hideBox);
         card.addView(row2, top(act, 8));
+
+        // ---- 开关 3：一像素保活（真正解决"要打开 App 才收到"） ----
+        final boolean[] pixelOn = {PixelKeeper.isRunning()};
+        final TextView[] pixelBox = new TextView[1];
+        LinearLayout row3 = toggleRow(act, "屏幕边缘常驻（更可靠）",
+                "挂一个看不见的 1 像素窗口，系统就不会把你当后台冻结 ——\n"
+                        + "这样不打开 App 也能及时收到通知。需要「显示在其他应用上层」权限",
+                pixelOn[0], new Runnable() {
+                    public void run() {
+                        if (pixelOn[0]) {
+                            PixelKeeper.stop();
+                            pixelOn[0] = false;
+                            pixelBox[0].setText("☐");
+                            pixelBox[0].setTextColor(Ui.TEXT_MUTED);
+                            Toast2.warn(act, "已关闭一像素保活");
+                            return;
+                        }
+                        if (!PixelKeeper.canOverlay(act)) {
+                            PixelKeeper.requestOverlay(act);
+                            Toast2.warn(act, "请允许「显示在其他应用上层」，回来再点一次");
+                            return;
+                        }
+                        boolean ok = PixelKeeper.start(act);
+                        pixelOn[0] = ok;
+                        pixelBox[0].setText(ok ? "☑" : "☐");
+                        pixelBox[0].setTextColor(ok ? Ui.PRIMARY : Ui.TEXT_MUTED);
+                        Toast2.ok(act, ok ? "已开启常驻（看不见的）" : "开启失败，检查悬浮窗权限");
+                    }
+                }, pixelBox);
+        card.addView(row3, top(act, 8));
+
+        // 权限提示
+        if (!PixelKeeper.canOverlay(act)) {
+            TextView fix2 = Ui.pill(act, "⚠ 开启上面这项需要先授权「显示在其他应用上层」",
+                    Ui.WARN_SOFT, Ui.WARN, 11.5f, 14, 8, true);
+            fix2.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    PixelKeeper.requestOverlay(act);
+                }
+            });
+            card.addView(fix2, top(act, 8));
+        }
 
         // ---- 提醒程度联动：没给悬浮窗权限时给个入口 ----
         if (RemindSettings.level(act) >= Remind.OVERLAY && !AlertCenter.canOverlay(act)) {
