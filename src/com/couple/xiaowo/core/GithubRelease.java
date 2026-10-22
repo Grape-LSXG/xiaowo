@@ -35,7 +35,7 @@ public final class GithubRelease {
      * 默认仓库。
      * 注意：两个 App 都从这里取，靠 tag 里的关键字区分是哪个包。
      */
-    public static final String DEFAULT_REPO = "Grape-LSXG/xiaowo";
+    public static final String DEFAULT_REPO = "Grape-LSXG/xiaowo";   // 已实测可读可下
 
     public static final String KEY_REPO = "gh_repo";
     public static final String KEY_ON = "gh_update_on";
