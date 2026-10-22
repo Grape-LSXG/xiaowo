@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.couple.xiaowo.order"
+    android:versionCode="22"
+    android:versionName="3.1">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 系统通知（Android 13+ 需要运行时申请） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗：让对方发来的爱心和消息直接飘到屏幕上 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Android 14+ 里，从后台弹悬浮窗需要声明这个，否则会被系统拦 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- 自动更新：下载新版本后调起系统安装器 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 前台服务保活（Android 14+ 必须声明类型） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 16/17 的「本地网络」权限：老系统上写进清单也无害 -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <application
+        android:label="@APP_LABEL@"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:extractNativeLibs="true"
+        android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <activity
+            android:name="com.couple.xiaowo.ui.MainActivity"
+            android:exported="true"
+            android:label="@APP_LABEL@"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- 后台保活：前台服务 + 常驻通知 -->
+        <service
+            android:name="com.couple.xiaowo.core.KeepAlive"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 自动更新用：把下载好的 APK 以 content:// 交给系统安装器 -->
+        <provider
+            android:name="com.couple.xiaowo.core.ApkFileProvider"
+            android:authorities="@PKG@.updates"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+    </application>
+</manifest>

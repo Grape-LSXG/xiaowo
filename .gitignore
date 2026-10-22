@@ -1,0 +1,21 @@
+# 构建产物
+build/
+*.apk
+*.zip
+*.tar.gz
+
+# 密钥（绝不外传）
+debug.keystore
+*.jks
+*.keystore
+
+# 大体积二进制：内置的 frpc（24MB，从官方 launcher 提取）
+tools/prebuilt/
+
+# Android SDK / JDK（太大，别人自己装）
+tools/sdk/
+
+# 缓存
+__pycache__/
+*.pyc
+.DS_Store

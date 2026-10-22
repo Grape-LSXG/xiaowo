@@ -1,14 +1,7 @@
 {
-  "order": {
-    "versionCode": 8,
-    "versionName": "1.7",
-    "url": "https://gitee.com/Quriosity233/love/raw/master/xiaowo-order.apk",
-    "notes": "问题修复与体验优化"
-  },
-  "recv": {
-    "versionCode": 8,
-    "versionName": "1.7",
-    "url": "https://gitee.com/Quriosity233/love/raw/master/xiaowo-recv.apk",
-    "notes": "问题修复与体验优化"
-  }
+  "versionCode": 22,
+  "versionName": "3.1",
+  "orderApk": "xiaowo-order.apk",
+  "recvApk": "xiaowo-recv.apk",
+  "notes": "主页改用「连接方式」入口（去掉 SakuraFrp 表述）；GitHub Release 更新通道；点单端异地自动更新修复"
 }
