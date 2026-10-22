@@ -73,6 +73,8 @@ public final class GithubRelease {
         public String assetName = "";
         /** 真正的下载地址（API 的 asset url） */
         public String assetApiUrl = "";
+        /** browser_download_url，作为 API 路径不通时的备用下载地址 */
+        public String assetDownUrl = "";
         public long size;
     }
 
@@ -121,6 +123,7 @@ public final class GithubRelease {
                         // 只认 .apk 资产
                         String assetName = null;
                         String assetUrl = null;
+                        String assetDown = null;
                         long size = 0;
                         Object assetsObj = rel.get("assets");
                         if (assetsObj instanceof java.util.List) {
@@ -130,6 +133,7 @@ public final class GithubRelease {
                                 if (name.endsWith(".apk")) {
                                     assetName = name;
                                     assetUrl = Json.str(am, "url", "");
+                                    assetDown = Json.str(am, "browser_download_url", "");
                                     size = Json.num(am, "size", 0);
                                     break;
                                 }
@@ -147,6 +151,7 @@ public final class GithubRelease {
                             best.notes = shorten(Json.str(rel, "body", ""), 300);
                             best.assetName = assetName;
                             best.assetApiUrl = assetUrl;
+                            best.assetDownUrl = assetDown;
                             best.size = size;
                         }
                     }
@@ -228,68 +233,95 @@ public final class GithubRelease {
         }
         new Thread(new Runnable() {
             public void run() {
-                HttpURLConnection conn = null;
-                InputStream in = null;
-                FileOutputStream fos = null;
-                try {
-                    conn = (HttpURLConnection) new URL(rel.assetApiUrl).openConnection();
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(60000);
-                    conn.setRequestProperty("User-Agent", UA);
-                    conn.setRequestProperty("Accept", "application/octet-stream");
-                    conn.setInstanceFollowRedirects(true);
-                    int code = conn.getResponseCode();
-                    if (code != 200) {
-                        if (cb != null) {
-                            cb.done(null, 0, "下载失败 HTTP " + code);
-                        }
-                        return;
+                // 下载地址按优先级试：API asset url → browser_download_url
+                // 实测某些网络下 API 的 302 目标（release-assets）不稳，
+                // 此时 browser_download_url 走 github.com 反而是通的。
+                String[] urls = new String[]{rel.assetApiUrl, rel.assetDownUrl};
+                String lastErr = "下载失败";
+                for (String url : urls) {
+                    if (url == null || url.length() == 0) {
+                        continue;
                     }
-                    long total = Math.max(conn.getContentLength(), rel.size);
-                    in = conn.getInputStream();
-                    fos = new FileOutputStream(out);
-                    byte[] buf = new byte[32 * 1024];
-                    long got = 0;
-                    int n;
-                    int lastPct = -1;
-                    while ((n = in.read(buf)) > 0) {
-                        fos.write(buf, 0, n);
-                        got += n;
-                        if (total > 0 && cb != null) {
-                            int pct = (int) (got * 100 / total);
-                            if (pct != lastPct) {
-                                lastPct = pct;
-                                cb.onProgress(pct);
+                    int tryCount = 2;   // 每个地址试两次，应对偶发网络抖动
+                    for (int i = 0; i < tryCount; i++) {
+                        String err = downloadOnce(url, rel.size, out, cb);
+                        if (err == null) {
+                            if (cb != null) {
+                                cb.done(out, out.length(), null);
                             }
+                            return;
+                        }
+                        lastErr = err;
+                        // 第一次失败短暂等一下再试，给网络恢复一点时间
+                        try {
+                            Thread.sleep(800);
+                        } catch (InterruptedException ignored) {
                         }
                     }
-                    fos.flush();
-                    if (cb != null) {
-                        cb.done(out, got, null);
-                    }
-                } catch (Exception e) {
-                    if (cb != null) {
-                        cb.done(null, 0, "下载出错：" + e.getMessage());
-                    }
-                } finally {
-                    try {
-                        if (in != null) {
-                            in.close();
-                        }
-                    } catch (Exception ignore) {
-                    }
-                    try {
-                        if (fos != null) {
-                            fos.close();
-                        }
-                    } catch (Exception ignore) {
-                    }
-                    if (conn != null) {
-                        conn.disconnect();
-                    }
+                }
+                if (cb != null) {
+                    cb.done(null, 0, lastErr);
                 }
             }
         }).start();
+    }
+
+    /** 单次下载；成功返回 null，失败返回错误描述 */
+    private static String downloadOnce(String url, long expectedSize, File out,
+                                       DownloadCallback cb) {
+        HttpURLConnection conn = null;
+        InputStream in = null;
+        FileOutputStream fos = null;
+        try {
+            conn = (HttpURLConnection) new URL(url).openConnection();
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(60000);
+            conn.setRequestProperty("User-Agent", UA);
+            conn.setRequestProperty("Accept", "application/octet-stream");
+            conn.setInstanceFollowRedirects(true);
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                return "HTTP " + code;
+            }
+            long total = Math.max(conn.getContentLength(), expectedSize);
+            in = conn.getInputStream();
+            fos = new FileOutputStream(out);
+            byte[] buf = new byte[32 * 1024];
+            long got = 0;
+            int n;
+            int lastPct = -1;
+            while ((n = in.read(buf)) > 0) {
+                fos.write(buf, 0, n);
+                got += n;
+                if (total > 0 && cb != null) {
+                    int pct = (int) (got * 100 / total);
+                    if (pct != lastPct) {
+                        lastPct = pct;
+                        cb.onProgress(pct);
+                    }
+                }
+            }
+            fos.flush();
+            return null;
+        } catch (Exception e) {
+            return "网络异常：" + e.getClass().getSimpleName();
+        } finally {
+            try {
+                if (in != null) {
+                    in.close();
+                }
+            } catch (Exception ignore) {
+            }
+            try {
+                if (fos != null) {
+                    fos.close();
+                }
+            } catch (Exception ignore) {
+            }
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
     }
 
     public interface DownloadCallback {
