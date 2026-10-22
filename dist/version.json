@@ -1,7 +1,7 @@
 {
-  "versionCode": 26,
-  "versionName": "3.5",
+  "versionCode": 27,
+  "versionName": "3.6",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "权限门去取消键+锁屏弹窗+vivo i管家引导；两端启动自动同步订单聊天；主题切换保持当前页；接单端可截图看点单端屏幕；换右上角图标"
+  "notes": "权限门改为每次打开都检查、有问题才拦（去重不叠加）；GitHub 检查超时重试3次+使用中每5分钟周期检查"
 }
