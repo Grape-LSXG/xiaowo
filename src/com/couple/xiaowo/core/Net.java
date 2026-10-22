@@ -526,6 +526,20 @@ public final class Net {
      * 只处理本协议需要的 GET/POST，够用且没有第三方依赖。
      */
     public static final class Server {
+
+        /**
+         * 单次请求体上限。
+         *
+         * Content-Length 是**客户端说了算**的。如果直接按它 new byte[]，
+         * 任何能连上端口的人发一个 "Content-Length: 2000000000"
+         * 就能让我们申请 2GB，OutOfMemoryError 把整个进程干掉。
+         * 这个端口在局域网里谁都能连，所以必须卡上限。
+         *
+         * 合法 body 最大是订单/聊天/菜谱同步，都是几 KB 量级；
+         * 8MB 留足余量（APK 传输走的是 Blob 响应，不经这里）。
+         */
+        private static final int MAX_REQUEST_BODY = 8 * 1024 * 1024;
+
         private ServerSocket ss;
         private Thread acceptThread;
         private volatile boolean running;
@@ -635,6 +649,10 @@ public final class Net {
                 }
                 String body = "";
                 if (contentLength > 0) {
+                    if (contentLength > MAX_REQUEST_BODY) {
+                        // 超限直接不处理（不读、不分配），回一个空响应让对端超时
+                        return;
+                    }
                     byte[] buf = new byte[contentLength];
                     int read = 0;
                     while (read < contentLength) {

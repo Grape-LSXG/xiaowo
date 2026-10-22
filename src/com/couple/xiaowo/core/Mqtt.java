@@ -41,6 +41,9 @@ public final class Mqtt {
 
     private static final String TOPIC_PREFIX = "xiaowo/";
 
+    /** 单个 MQTT 包上限（公共 broker 上任何人可发，必须防 OOM） */
+    private static final int MAX_PACKET = 1024 * 1024;
+
     private Mqtt() {
     }
 
@@ -306,6 +309,20 @@ public final class Mqtt {
         }
         if (len == 0) {
             return new byte[0];
+        }
+        /*
+         * 上限保护。
+         *
+         * MQTT 的剩余长度是 4 字节变长整数，理论上能表示到 268MB。
+         * 我们订阅的是公共 broker —— 任何人都能往同一个 topic 发东西，
+         * 也能发一个声称很大的包。不设限的话 new byte[len] 就能
+         * 直接把 App 撑爆（OutOfMemoryError）。
+         *
+         * 协议里我们发的消息都是几 KB 级（订单/聊天/同步），
+         * 1MB 已经远超实际需要。
+         */
+        if (len > MAX_PACKET) {
+            throw new Exception("MQTT 包过大：" + len);
         }
         byte[] data = new byte[len];
         int read = 0;

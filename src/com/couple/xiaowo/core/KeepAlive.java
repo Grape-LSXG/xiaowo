@@ -105,8 +105,23 @@ public final class KeepAlive extends Service {
             hint = Protocol.ROLE_RECV.equals(role)
                     ? "正在等猫猫点单" : "正在等着张老师";
         }
-        startForeground(NOTIF_ID, buildNotification(this, role, hint));
-        running = true;
+        /*
+         * startForeground 可能抛异常：
+         *   · Android 13+ 没给 POST_NOTIFICATIONS（部分 ROM 会直接抛）
+         *   · 服务类型没在清单里声明对应权限
+         *   · 系统正处于"后台启动限制"窗口
+         * 抛出去就是 onStartCommand 崩溃 → 进程崩。所以必须兜住：
+         * 失败了就当作"这个服务起不来"，把标记回退，让上层逻辑知道。
+         */
+        try {
+            startForeground(NOTIF_ID, buildNotification(this, role, hint));
+            running = true;
+        } catch (Throwable t) {
+            running = false;
+            // 前台服务起不来就别继续占用资源
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         acquireWakeLock();
         /*
          * 一像素悬浮窗：这是"不用打开 App 也能收到"的关键。

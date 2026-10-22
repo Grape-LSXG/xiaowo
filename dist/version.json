@@ -1,18 +1,18 @@
 {
-  "versionCode": 39,
-  "versionName": "4.1",
+  "versionCode": 40,
+  "versionName": "4.1.1",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "移除 SakuraFrp/frpc（接单端 6.1MB→1.5MB）；修复规格相关 bug（减号按规格减、冰箱存规格并显示、历史与订单显示规格、旧菜单覆盖导致规格丢失）；修复菜谱同步重复合并、菜谱不落盘、聊天与公告重启丢失",
+  "notes": "移除 SakuraFrp/frpc（接单端 1.5MB）；修复规格系列 bug（减号按规格减、冰箱存规格、历史显示规格、旧菜单覆盖规格）；核心健壮性：HTTP 请求体与 MQTT 包加大小上限防 OOM、前台服务启动失败不再崩溃、菜谱与聊天落盘",
   "order": {
-    "versionCode": 39,
-    "versionName": "4.1",
+    "versionCode": 40,
+    "versionName": "4.1.1",
     "url": "",
     "size": 767331
   },
   "recv": {
-    "versionCode": 39,
-    "versionName": "4.1",
+    "versionCode": 40,
+    "versionName": "4.1.1",
     "url": "",
     "size": 1533367
   },
