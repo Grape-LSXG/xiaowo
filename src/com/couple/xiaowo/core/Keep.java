@@ -253,6 +253,99 @@ public final class Keep {
         }
     }
 
+    /**
+     * 跳到「电池 / 后台耗电管理」并尽量定位到本 App。
+     *
+     * ── 为什么不用 App 详情页 ──
+     *
+     * 详情页是通用入口，点进去用户得自己翻「电池」子项；而用户想要的是
+     * 直达"允许后台高耗电"那个开关。所以按优先级试：
+     *
+     *   1) ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS —— 系统直接弹
+     *      "允许本应用在后台使用电池？"的确认框，点一下就完事，最能定位到 App。
+     *      （需要 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS，已在清单里声明）
+     *
+     *   2) vivo 私有入口：直接打开系统「电池」页并尝试带上本 App 的 extra。
+     *      厂商 ROM 对这条的处理不一，找不到就忽略、走第 3 步。
+     *
+     *   3) ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS —— 电池优化白名单列表，
+     *      里面能定位到"未优化"里找到本 App。
+     *
+     *   4) 最后兜底回 App 详情页。
+     *
+     * 注意：这条是"带去设置"类操作，无论走成哪条，都记一次已引导。
+     */
+    public static void goBatteryPage(Activity act) {
+        if (act == null) {
+            return;
+        }
+        markOemGuideConfirmed(act);
+        markBatteryHintShown(act);
+        // 1) 系统确认框（最省事，直接针对本 App）
+        try {
+            Intent i = new Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(android.net.Uri.parse("package:" + act.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            return;
+        } catch (Exception ignore) {
+        }
+        // 2) vivo：打开系统电池页（定位到 App 依赖厂商 extra，找不到就跳过）
+        if (tryVivoBattery(act)) {
+            return;
+        }
+        // 3) 电池优化列表
+        try {
+            Intent i = new Intent(
+                    android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            return;
+        } catch (Exception ignore) {
+        }
+        // 4) 兜底：App 详情页
+        try {
+            Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:" + act.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+        } catch (Exception ignore) {
+        }
+    }
+
+    /**
+     * 尝试用 vivo 的私有方式打开电池页。
+     *
+     * 厂商 ROM 通常没有公开文档，这里用最常见的组合：
+     *   · 显式打开「手机管家 / i管家」的电池页
+     *   · 或发一个带 package extra 的电池设置 Intent
+     * 找不到对应组件就返回 false，由上层走通用兜底。
+     */
+    private static boolean tryVivoBattery(Activity act) {
+        try {
+            // 先试手机管家（iQOO/vivo 均用 com.iqoo.secure）
+            Intent launch = act.getPackageManager()
+                    .getLaunchIntentForPackage("com.iqoo.secure");
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                act.startActivity(launch);
+                return true;
+            }
+        } catch (Exception ignore) {
+        }
+        // 再试把本 App 的包名带给系统电池设置
+        try {
+            Intent i = new Intent("android.settings.BATTERY_SAVER_SETTINGS");
+            i.putExtra("package", act.getPackageName());
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            act.startActivity(i);
+            return true;
+        } catch (Exception ignore) {
+        }
+        return false;
+    }
+
     /** 「去补悬浮窗权限」 */
     public static void goOverlay(Activity act) {
         PixelKeeper.requestOverlay(act);

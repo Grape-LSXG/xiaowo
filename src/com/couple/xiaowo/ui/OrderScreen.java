@@ -92,6 +92,12 @@ public class OrderScreen extends LinearLayout {
     private String peerHost = null;
     private int peerPort = 0;
     private boolean sending = false;
+    /** 「选菜进冰箱」模式：true 时下单键变成「加入冰箱」 */
+    private boolean pickingForFridge = false;
+    /** 随机选菜按钮的引用（进冰箱模式时要藏起来） */
+    private TextView randBtn;
+    /** 取消按钮（选菜进冰箱模式下才显示） */
+    private TextView cancelPickBtn;
     private Net.Server server;
 
     private List<History.Entry> history = new ArrayList<History.Entry>();
@@ -893,14 +899,29 @@ public class OrderScreen extends LinearLayout {
         mLp.weight = 1f;
         bar.addView(money, mLp);
 
-        TextView rand = Ui.pill(act, "随机选菜", 0xFFFFFFFF, Ui.TEXT, 11, 11, 8, false);
-        rand.setBackground(Ui.round(0xFFFFFFFF, dp(999), Math.max(1, dp(0.8f)), 0xFFE7E1F2));
-        rand.setOnClickListener(new OnClickListener() {
+        randBtn = Ui.pill(act, "随机选菜", 0xFFFFFFFF, Ui.TEXT, 11, 11, 8, false);
+        randBtn.setBackground(Ui.round(0xFFFFFFFF, dp(999), Math.max(1, dp(0.8f)), 0xFFE7E1F2));
+        randBtn.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
                 randomPick();
             }
         });
-        bar.addView(rand);
+        bar.addView(randBtn);
+
+        /*
+         * 「选菜进冰箱」模式下多一个「取消」按钮。
+         * 平时它隐藏；进入模式时和下单键一起切换形态。
+         */
+        cancelPickBtn = Ui.pill(act, "取消", 0xFFFFFFFF, Ui.TEXT, 12, 14, 8, false);
+        cancelPickBtn.setBackground(Ui.round(0xFFFDECEC, dp(999),
+                Math.max(1, dp(0.8f)), 0xFFE7C5C5));
+        cancelPickBtn.setVisibility(View.GONE);
+        cancelPickBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                exitFridgePickMode();
+            }
+        });
+        bar.addView(cancelPickBtn);
 
         orderBtn = Ui.pill(act, "下单", 0xFFD9D4E6, 0xFFFFFFFF, 13, 20, 9, true);
         LinearLayout.LayoutParams oLp = new LinearLayout.LayoutParams(
@@ -909,16 +930,103 @@ public class OrderScreen extends LinearLayout {
         bar.addView(orderBtn, oLp);
         orderBtn.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
-                placeOrder(NOTES[random.nextInt(NOTES.length)]);
+                if (pickingForFridge) {
+                    addCartToFridge();
+                } else {
+                    placeOrder(NOTES[random.nextInt(NOTES.length)]);
+                }
             }
         });
         orderBtn.setOnLongClickListener(new OnLongClickListener() {
             public boolean onLongClick(View v) {
-                showNoteDialog();
+                if (!pickingForFridge) {
+                    showNoteDialog();
+                }
                 return true;
             }
         });
         return bar;
+    }
+
+    /** 进入「选菜进冰箱」模式：跳厨房，下单键变「加入冰箱」，显示取消 */
+    private void enterFridgePickMode() {
+        pickingForFridge = true;
+        refreshCartBar();
+        // 跳回厨房让用户挑菜
+        switchTab(TAB_KITCHEN);
+        toast("挑几道菜，点「加入冰箱」就囤进去啦");
+    }
+
+    /** 退出选菜模式，恢复普通下单形态，并清掉购物车里选的菜 */
+    private void exitFridgePickMode() {
+        if (!pickingForFridge) {
+            return;
+        }
+        pickingForFridge = false;
+        cart.clear();
+        for (String k : new ArrayList<String>(actionBoxes.keySet())) {
+            refreshActions(k);
+        }
+        refreshCartBar();
+        updateCart();
+        switchTab(TAB_FRIDGE);
+    }
+
+    /** 把购物车里的菜全部囤进冰箱（选菜模式下的「加入冰箱」） */
+    private void addCartToFridge() {
+        if (cart.isEmpty()) {
+            toast("先去点两道菜吧～");
+            return;
+        }
+        int added = 0;
+        for (Map.Entry<String, Integer> e : cart.entrySet()) {
+            String key = e.getKey();
+            if (!fridge.contains(key)) {
+                fridge.add(key);
+                added++;
+            }
+        }
+        saveFridge();
+        // 退出模式（会清购物车并回冰箱页）
+        pickingForFridge = false;
+        cart.clear();
+        for (String k : new ArrayList<String>(actionBoxes.keySet())) {
+            refreshActions(k);
+        }
+        refreshCartBar();
+        updateCart();
+        switchTab(TAB_FRIDGE);
+        toast(added > 0 ? "已囤进 " + added + " 道菜 🧊" : "这些菜都已经在冰箱里了");
+    }
+
+    /**
+     * 按当前模式刷新底栏：下单按钮文字、随机/取消按钮可见性。
+     */
+    private void refreshCartBar() {
+        if (orderBtn == null) {
+            return;
+        }
+        if (pickingForFridge) {
+            orderBtn.setText("加入冰箱");
+            orderBtn.setBackground(Ui.round(Ui.ACCENT, dp(999)));
+            orderBtn.setTextColor(0xFFFFFFFF);
+            if (randBtn != null) {
+                randBtn.setVisibility(View.GONE);
+            }
+            if (cancelPickBtn != null) {
+                cancelPickBtn.setVisibility(View.VISIBLE);
+            }
+        } else {
+            orderBtn.setText("下单");
+            orderBtn.setBackground(Ui.round(0xFFD9D4E6, dp(999)));
+            orderBtn.setTextColor(0xFFFFFFFF);
+            if (randBtn != null) {
+                randBtn.setVisibility(View.VISIBLE);
+            }
+            if (cancelPickBtn != null) {
+                cancelPickBtn.setVisibility(View.GONE);
+            }
+        }
     }
     private View buildFridgePage() {
         LinearLayout page = Ui.vertical(act);
@@ -975,7 +1083,11 @@ public class OrderScreen extends LinearLayout {
         TextView add = Ui.pill(act, "＋ 再囤几道", Ui.PURPLE_SOFT, Ui.PURPLE_DEEP, 12, 20, 8, true);
         add.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
-                showFridgePicker();
+                /*
+                 * 不再弹多选列表，而是进入「选菜模式」：
+                 * 跳回厨房，下单键变「加入冰箱」，多一个「取消」。
+                 */
+                enterFridgePickMode();
             }
         });
         LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(
@@ -1444,6 +1556,31 @@ public class OrderScreen extends LinearLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         cLp3.topMargin = dp(8);
         content.addView(clear, cLp3);
+
+        /*
+         * 「我」页最下面的爱心按钮。
+         *
+         * 点一下爆一小簇，长按爆一大片 —— 纯粹是给猫猫自己点着玩的。
+         */
+        TextView love = Ui.pill(act, "❤️", Ui.ACCENT_SOFT, Ui.ACCENT, 22, 24, 12, true);
+        love.setGravity(Gravity.CENTER);
+        love.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                host.burst(18);
+                vibrate();
+            }
+        });
+        love.setOnLongClickListener(new OnLongClickListener() {
+            public boolean onLongClick(View v) {
+                host.burst(80);
+                vibrate();
+                return true;
+            }
+        });
+        LinearLayout.LayoutParams loveLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        loveLp.topMargin = dp(16);
+        content.addView(love, loveLp);
 
         content.addView(Ui.tv(act, "小窝 · 猫猫的点单端 " + Ui.appVersion(act),
                 10, Ui.TEXT_MUTED, false), top(16));
@@ -2083,69 +2220,6 @@ public class OrderScreen extends LinearLayout {
                 }
             }
         }).start();
-    }
-    /**
-     * 「再囤几道」—— 列菜让用户勾选囤进冰箱。
-     *
-     * ── 之前为什么是空列表 ──
-     *
-     * 上一版这里只列 `!it.hasSpecs()` 的菜，理由是"有规格的菜要先选规格，
-     * 多选列表表达不了"。但后来给 22 道预制菜**全部配上了规格**，
-     * 于是筛选结果恒为空 —— 用户点开只看到一片空白。
-     *
-     * ── 现在怎么做 ──
-     *
-     * 不再筛掉带规格的菜，而是让每一项显示成「菜名」或「菜名 · 规格」，
-     * 规格展开成多行。这样列表里永远有东西，且勾选的含义明确。
-     * 默认勾选冰箱里已有的组合，取消勾选即从冰箱移除。
-     */
-    private void showFridgePicker() {
-        // 1) 展开成「可囤的组合」：没规格的只有一行，有规格的每个规格一行
-        final List<String> keys = new ArrayList<String>();
-        final List<String> labels = new ArrayList<String>();
-        for (Menu.Category c : Menu.CATEGORIES) {
-            for (Menu.Item it : c.items) {
-                if (!it.hasSpecs()) {
-                    keys.add(it.name);
-                    labels.add(it.name);
-                } else {
-                    for (String sp : it.specs) {
-                        keys.add(com.couple.xiaowo.core.CartKey.of(it.name, sp));
-                        labels.add(it.name + " · " + sp);
-                    }
-                }
-            }
-        }
-        final String[] arr = labels.toArray(new String[0]);
-        final boolean[] checked = new boolean[keys.size()];
-        for (int i = 0; i < keys.size(); i++) {
-            checked[i] = fridge.contains(keys.get(i));
-        }
-
-        new AlertDialog.Builder(act)
-                .setTitle("选几道菜囤进冰箱")
-                .setMultiChoiceItems(arr, checked, new DialogInterface.OnMultiChoiceClickListener() {
-                    public void onClick(DialogInterface dlg, int which, boolean isChecked) {
-                        checked[which] = isChecked;
-                    }
-                })
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface dlg, int which) {
-                        for (int i = 0; i < keys.size(); i++) {
-                            String key = keys.get(i);
-                            boolean in = fridge.contains(key);
-                            if (checked[i] && !in) {
-                                fridge.add(key);
-                            } else if (!checked[i] && in) {
-                                fridge.remove(key);
-                            }
-                        }
-                        saveFridge();
-                        switchTab(TAB_FRIDGE);
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
     }
     private void switchTab(int t) {
         tab = t;

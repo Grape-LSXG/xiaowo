@@ -1,18 +1,18 @@
 {
-  "versionCode": 41,
-  "versionName": "4.2",
+  "versionCode": 42,
+  "versionName": "4.3",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "冰箱「再囤几道」列表不再为空（规格展开成多行）；「选规格」标签与加号合并为圆角矩形按钮；感光切换加防抖与滞滞（阈值 20/200 lux、间隔 8s、连续两次同向才切）+ 300ms 日月过渡遮罩；截图提升到 1600px/92%（直连高清，中转账仍用低清）",
+  "notes": "后台运行跳转改为电池耗电管理；冰箱选菜模式（跳厨房、下单键变加入冰箱、加取消）；接单端每2分钟自动刷新菜谱；部分牵强菜改回无规格；点单端我页加❤️爆爱心按钮",
   "order": {
-    "versionCode": 41,
-    "versionName": "4.2",
+    "versionCode": 42,
+    "versionName": "4.3",
     "url": "",
     "size": 771427
   },
   "recv": {
-    "versionCode": 41,
-    "versionName": "4.2",
+    "versionCode": 42,
+    "versionName": "4.3",
     "url": "",
     "size": 1541559
   },

@@ -230,7 +230,7 @@ public final class KeepAliveCard {
             h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
                     .setOnClickListener(new View.OnClickListener() {
                         public void onClick(View v) {
-                            Keep.requestIgnoreBattery(act);
+                            Keep.goBatteryPage(act);
                         }
                     });
         }
@@ -252,7 +252,8 @@ public final class KeepAliveCard {
             h.rowsBox.getChildAt(h.rowsBox.getChildCount() - 1)
                     .setOnClickListener(new View.OnClickListener() {
                         public void onClick(View v) {
-                            Keep.goAppDetail(act);
+                            // 直接跳到电池/后台耗电页并定位本 App
+                            Keep.goBatteryPage(act);
                         }
                     });
         }

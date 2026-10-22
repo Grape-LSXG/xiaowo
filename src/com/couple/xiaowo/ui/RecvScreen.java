@@ -55,6 +55,9 @@ import java.util.Map;
  */
 public class RecvScreen extends LinearLayout {
 
+    /** 定时拉菜谱的周期（2 分钟） */
+    private static final long AUTO_REFRESH_MENU_MS = 2 * 60 * 1000L;
+
     private static final int TAB_KITCHEN = 0;
     private static final int TAB_ORDERS = 1;
     private static final int TAB_FRIDGE = 2;
