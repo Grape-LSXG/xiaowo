@@ -153,6 +153,8 @@ public class OrderScreen extends LinearLayout {
         startServer();
         scheduleAutoPeerUpdate();
         scheduleSyncPush();
+        // 使用中周期性检查 GitHub 更新（静默，偶尔试一次）
+        GitHubCard.startPeriodic(act, false);
     }
 
     /**
@@ -2522,6 +2524,7 @@ public class OrderScreen extends LinearLayout {
     }
 
     public void shutdown() {
+        GitHubCard.stopPeriodic();
         if (server != null) {
             server.stop();
             server = null;
