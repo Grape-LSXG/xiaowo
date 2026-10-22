@@ -163,6 +163,27 @@ public final class PermissionGate {
     /** 当前正在显示的阻断弹窗 —— 用来防重复弹（onCreate + onResume 都调 ensure 时去重） */
     private static Dialog blockingDialog;
 
+    /**
+     * 是否"刚要过一次设置页、需要回来复检"。
+     *
+     * 为什么要有它：原来 onResume 每次都调 ensure()，用户只是切个后台再回来
+     * （没有去改权限）也会被弹一次框，非常烦。现在只有**主动点了去设置**
+     * 之后回到前台，才重新检查并提示。
+     */
+    private static boolean pendingRecheck = false;
+
+    /** 记录"即将跳设置页"，回来时据此决定是否复检 */
+    public static void noteGoSettings() {
+        pendingRecheck = true;
+    }
+
+    /** 取出并清掉待复检标记 */
+    public static boolean consumePendingRecheck() {
+        boolean v = pendingRecheck;
+        pendingRecheck = false;
+        return v;
+    }
+
     private static android.content.SharedPreferences pret(Activity act) {
         return act.getSharedPreferences("xiaowo", android.content.Context.MODE_PRIVATE);
     }
@@ -221,6 +242,7 @@ public final class PermissionGate {
                 "去开启", new Runnable() {
                     public void run() {
                         blockingDialog = null;
+                        noteGoSettings();
                         m.go(act);
                     }
                 });

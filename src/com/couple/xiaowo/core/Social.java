@@ -25,7 +25,9 @@ public final class Social {
         public long ts = 0L;
 
         public String toJson() {
+            // 同上：中转通道依靠 type 分发，缺了就会被丢
             return Json.object(Json.fields(
+                    "type", Json.quote(Protocol.TYPE_NOTICE),
                     "from", Json.quote(from),
                     "text", Json.quote(text),
                     "ts", String.valueOf(ts)));
@@ -51,7 +53,16 @@ public final class Social {
         public boolean mine = false;
 
         public String toJson() {
+            /*
+             * 必须带 type。
+             *
+             * 走 HTTP 时接收方靠路径 /chat 就能认出是聊天；
+             * 但走 MQTT 中转时，接收方是用 Protocol.typeOf(payload) 判断类型的 ——
+             * 没有 type 字段就得到空字符串，消息会被直接丢掉。
+             * 这正是"消息发不出去"的根因。
+             */
             return Json.object(Json.fields(
+                    "type", Json.quote(Protocol.TYPE_CHAT),
                     "who", Json.quote(who),
                     "text", Json.quote(text),
                     "ts", String.valueOf(ts)));

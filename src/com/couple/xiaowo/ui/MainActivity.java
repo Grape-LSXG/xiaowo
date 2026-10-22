@@ -205,6 +205,16 @@ public class MainActivity extends Activity implements HeartHost {
         // 清掉老版本留下的可能不完整的 APK 缓存（一次性）
         com.couple.xiaowo.core.Updater.purgeStaleDownloads(this);
         setupAmbient();
+        /*
+         * 冷启动时按当前光线校正一次主题。
+         * 只在这里做（不在 onResume）—— 每次回前台都读光会导致不必要的 recreate/闪烁，
+         * 而 Ambient 传感器在 resume 后本就会按滞回规则自己跟上。
+         */
+        Theme.syncAutoFromSensor(this, new Runnable() {
+            public void run() {
+                recreate();
+            }
+        });
         startRelay();
 
         // 启动时权限门：缺权限就弹引导。
@@ -349,10 +359,19 @@ public class MainActivity extends Activity implements HeartHost {
             ambient.start();
         }
         /*
-         * 用户从授权页回来时再次检查权限。
-         * 全部就绪才放行；否则继续弹不可取消的引导框。
+         * 每次回到前台都检查权限（按需求：切回软件就检查一次）。
+         *
+         * ensure() 内部是幂等的：权限齐全时什么都不做；
+         * 有缺失才弹引导框，且已有框在显示时不会叠加。
          */
         PermissionGate.ensure(this);
+
+        /*
+         * 每次回到前台也检查一次更新。
+         * 静默进行（不打断界面），发现新版才提示/下载。
+         * 用 updateCheckOnResume() 而不是 run()，避免和手动检查互相干扰。
+         */
+        GitHubCard.checkOnResume(this, !BuildInfo.IS_ORDER);
 
         /*
          * 授权悬浮窗回来后，把一像素保活窗拉起来。
@@ -364,16 +383,13 @@ public class MainActivity extends Activity implements HeartHost {
          */
         KeepAliveCard.sync(this, !BuildInfo.IS_ORDER, null);
         /*
-         * AUTO 模式下再异步读一次光校正。
-         * 冷启动时 init() 用的是"上次记住的结论"，如果用户换了环境
-         * （比如从被窝走到窗边），这里能立刻纠正过来，不用等传感器
-         * 的 3 秒限流窗口。
+         * 不再每次回前台都读光校色。
+         *
+         * 原来这里会导致：只要光线判断结果和执行时不一致就 recreate()，
+         * 表现就是"每次从后台切回来屏幕闪一下"。
+         * 现在交给 Ambient 传感器在 resume 后自行按滞回规则判断（阈值放宽 + 8 秒节流），
+         * 只在真的跨过阈值时才切换一次。
          */
-        Theme.syncAutoFromSensor(this, new Runnable() {
-            public void run() {
-                recreate();
-            }
-        });
         // 回到前台：把常驻通知恢复成正常状态
         KeepAlive.update(this, BuildInfo.IS_ORDER ? Protocol.ROLE_ORDER : Protocol.ROLE_RECV,
                 BuildInfo.IS_ORDER ? "猫猫在线，正在等你接单" : "张老师在接单，随时可以点单");

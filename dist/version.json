@@ -1,18 +1,18 @@
 {
-  "versionCode": 42,
-  "versionName": "4.3",
+  "versionCode": 43,
+  "versionName": "4.4",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "后台运行跳转改为电池耗电管理；冰箱选菜模式（跳厨房、下单键变加入冰箱、加取消）；接单端每2分钟自动刷新菜谱；部分牵强菜改回无规格；点单端我页加❤️爆爱心按钮",
+  "notes": "修复消息发不出去（聊天/公告缺 type 字段，经中转会被丢弃）+ 给两端聊天加中转兜底；修复提醒程度等文字颜色在深色模式下的问题；每次切回前台检查权限与更新；UI 优化（无障碍标签、触摸目标、字号、底部导航）",
   "order": {
-    "versionCode": 42,
-    "versionName": "4.3",
+    "versionCode": 43,
+    "versionName": "4.4",
     "url": "",
     "size": 771427
   },
   "recv": {
-    "versionCode": 42,
-    "versionName": "4.3",
+    "versionCode": 43,
+    "versionName": "4.4",
     "url": "",
     "size": 1541559
   },

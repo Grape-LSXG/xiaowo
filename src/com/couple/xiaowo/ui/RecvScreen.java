@@ -129,6 +129,8 @@ public class RecvScreen extends LinearLayout {
 
         switchTab(sp.getInt("cur_tab", TAB_KITCHEN));
         startListening();
+        // 定时自动拉最新菜谱（同 Wi-Fi 直连拉；异地靠点单端广播，见 onRelayMessage）
+        scheduleMenuAutoRefresh();
 
         // 启动时不再自动检查更新（改为手动，见「我」页的「检查更新」）
 
@@ -998,7 +1000,7 @@ public class RecvScreen extends LinearLayout {
             String day = d.format(new Date(m.ts));
             if (!day.equals(lastDay)) {
                 lastDay = day;
-                TextView dl = Ui.tv(act, day, 9.5f, Ui.TEXT_MUTED, false);
+                TextView dl = Ui.tv(act, day, 10.5f, Ui.TEXT_MUTED, false);
                 dl.setGravity(Gravity.CENTER);
                 dl.setPadding(0, dp(8), 0, dp(4));
                 chatBox.addView(dl, new LinearLayout.LayoutParams(
@@ -1095,6 +1097,11 @@ public class RecvScreen extends LinearLayout {
                 }
                 break;
             }
+        }
+        // 直连全失败 → 走中转。异地时这是唯一能把消息送到对方的通路。
+        if (com.couple.xiaowo.core.Relay.enabled(act)) {
+            return com.couple.xiaowo.core.Relay.publish(act,
+                    Protocol.ROLE_RECV, body, 8000);
         }
         return false;
     }
@@ -1254,10 +1261,10 @@ public class RecvScreen extends LinearLayout {
                         public void run() {
                             if (msg != null) {
                                 savedTip.setText("✅ " + msg);
-                                savedTip.setTextColor(Ui.SUCCESS);
+                                savedTip.setTextColor(Theme.adaptText(Ui.SUCCESS));
                             } else {
                                 savedTip.setText("没能自动存入相册，可用下面的按钮重试");
-                                savedTip.setTextColor(Ui.WARN);
+                                savedTip.setTextColor(Theme.adaptText(Ui.WARN));
                             }
                         }
                     });
@@ -1277,7 +1284,7 @@ public class RecvScreen extends LinearLayout {
                                     if (msg != null) {
                                         toastOk("已保存 · 相册「小窝」里能看到");
                                         savedTip.setText("✅ " + msg);
-                                        savedTip.setTextColor(Ui.SUCCESS);
+                                        savedTip.setTextColor(Theme.adaptText(Ui.SUCCESS));
                                     } else {
                                         toastWarn("保存失败，检查一下存储空间");
                                     }
@@ -1591,6 +1598,55 @@ public class RecvScreen extends LinearLayout {
     }
 
     /** 启动后把本地订单+聊天推给对方 */
+    /**
+     * 定时自动刷新菜谱。
+     *
+     * 点单端随时可能改菜谱，接单端不能只靠「收到推送」这一条路 ——
+     * 推送可能因为点单端离线、没点同步、网络抖动漏掉。
+     * 所以每 2 分钟主动 GET /menu?pull=1 问一次（同 Wi-Fi 直连）；
+     * 异地直连不通时，由点单端每 3 分钟广播一次菜谱（见 OrderScreen）。
+     *
+     * 首轮延迟 8 秒（等界面和监听服务稳定），之后周期执行。
+     * 静默进行，只在真有变化时提示。
+     */
+    private void scheduleMenuAutoRefresh() {
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable[] self = new Runnable[1];
+        self[0] = new Runnable() {
+            public void run() {
+                if (act == null || act.isFinishing()
+                        || (android.os.Build.VERSION.SDK_INT >= 17 && act.isDestroyed())) {
+                    return;
+                }
+                new Thread(new Runnable() {
+                    public void run() {
+                        final String body = tryPullMenu();
+                        if (body == null) {
+                            return;   // 没连上，下一轮再试
+                        }
+                        act.runOnUiThread(new Runnable() {
+                            public void run() {
+                                String fpBefore = Menu.fingerprint();
+                                Menu.applyJson(body, true);
+                                saveMenu();
+                                boolean changed = !Menu.fingerprint().equals(fpBefore);
+                                if (menuStamp != null) {
+                                    menuStamp.setText(Menu.totalCount() + " 道 · " + nowHm());
+                                }
+                                pages[TAB_KITCHEN] = null;
+                                if (changed) {
+                                    Toast2.ok(act, "菜谱已自动更新：" + Menu.totalCount() + " 道");
+                                }
+                            }
+                        });
+                    }
+                }).start();
+                h.postDelayed(self[0], AUTO_REFRESH_MENU_MS);
+            }
+        };
+        h.postDelayed(self[0], 8000L);
+    }
+
     private void scheduleSyncPush() {
         postDelayed(new Runnable() {
             @Override
@@ -1918,6 +1974,22 @@ public class RecvScreen extends LinearLayout {
                 onOrderArrived(Protocol.Order.fromJson(payload));
             } else if (Protocol.TYPE_CHAT.equals(type)) {
                 onChatIncoming(Social.Msg.fromJson(payload));
+            } else if (Protocol.TYPE_MENU.equals(type)) {
+                /*
+                 * 菜谱从中转推过来（异地时直连拉不到，只能靠这条）。
+                 * 和 HTTP 那条走同一套 applyJson + 落盘逻辑。
+                 */
+                String fpBefore = Menu.fingerprint();
+                Menu.applyJson(payload, true);
+                saveMenu();
+                boolean changed = !Menu.fingerprint().equals(fpBefore);
+                if (menuStamp != null) {
+                    menuStamp.setText(Menu.totalCount() + " 道 · " + nowHm());
+                }
+                pages[TAB_KITCHEN] = null;
+                if (changed) {
+                    Toast2.ok(act, "菜谱已更新：" + Menu.totalCount() + " 道");
+                }
             } else if (Protocol.TYPE_NOTICE.equals(type)) {
                 Social.Notice n = Social.Notice.fromJson(payload);
                 notice = n;

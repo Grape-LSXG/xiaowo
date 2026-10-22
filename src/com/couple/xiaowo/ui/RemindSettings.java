@@ -112,8 +112,8 @@ public final class RemindSettings {
                     active ? Ui.PRIMARY : 0x00000000));
             TextView[] t = texts.get(i);
             t[0].setText(active ? "●" : "○");
-            t[0].setTextColor(active ? Ui.PRIMARY : Ui.TEXT_MUTED);
-            t[1].setTextColor(active ? Ui.PRIMARY_DEEP : Ui.TEXT);
+            t[0].setTextColor(Theme.adaptText(active ? Ui.PRIMARY : Ui.TEXT_MUTED));
+            t[1].setTextColor(Theme.adaptText(active ? Ui.PRIMARY_DEEP : Ui.TEXT));
             t[1].setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF,
                     active ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL));
         }

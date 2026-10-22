@@ -169,6 +169,45 @@ public final class GitHubCard {
         });
     }
 
+    /** 防止 onResume 连续触发时并发检查 */
+    private static volatile boolean resumeChecking = false;
+
+    /**
+     * 回到前台时静默检查一次更新。
+     *
+     * 和 run() 的区别：
+     *   · 不依赖界面上的 status/btn（onResume 时那两个引用可能是旧的）
+     *   · 有并发保护，切来切去不会同时发多个请求
+     *   · 发现新版才提示，没新版完全不打扰
+     */
+    public static void checkOnResume(final android.app.Activity act, final boolean isRecv) {
+        if (act == null || act.isFinishing()) {
+            return;
+        }
+        if (resumeChecking) {
+            return;
+        }
+        resumeChecking = true;
+        GithubRelease.check(act, isRecv, new GithubRelease.Callback() {
+            public void done(final GithubRelease.Release rel, final String error) {
+                resumeChecking = false;
+                // 检查失败：静默忽略（网络抖动是常态，下一轮再试）
+                if (error != null || rel == null) {
+                    return;
+                }
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (act.isFinishing()) {
+                            return;
+                        }
+                        Toast2.info(act, "发现新版 " + rel.versionName + "，正在后台下载…");
+                        downloadAndInstall(act, rel, null);
+                    }
+                });
+            }
+        });
+    }
+
     /**
      * 检查并（可选）下载。
      *

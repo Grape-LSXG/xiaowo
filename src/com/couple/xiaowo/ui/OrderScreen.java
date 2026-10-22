@@ -61,6 +61,9 @@ public class OrderScreen extends LinearLayout {
     private static final int TAB_MANAGE = 3;
     private static final int TAB_ME = 4;
 
+    /** 菜谱广播周期（异地同步靠它） */
+    private static final long MENU_BROADCAST_MS = 3 * 60 * 1000L;
+
     private static final String[] TAB_ICON = {"🏠", "🧾", "🧊", "📖", "😊"};
     private static final String[] TAB_NAME = {"厨房", "订单", "冰箱", "管理", "我"};
 
@@ -159,6 +162,7 @@ public class OrderScreen extends LinearLayout {
         startServer();
         scheduleAutoPeerUpdate();
         scheduleSyncPush();
+        scheduleMenuBroadcast();
         // 使用中周期性检查 GitHub 更新（静默，偶尔试一次）
         // 周期自动检查已关闭：更新只在用户点「检查更新」时进行
     }
@@ -174,6 +178,41 @@ public class OrderScreen extends LinearLayout {
      *   跳安装界面体验很差；而且失败时用户完全无感，会以为功能坏了。
      *   改手动之后，行为完全可预期。
      */
+    /**
+     * 定时把当前菜谱广播到中转房间。
+     *
+     * 为什么需要：接单端「自动刷新菜谱」靠直连 GET /menu?pull=1，
+     * 但异地时那条直连根本不通 —— 菜单就永远同步不过去。
+     * 这里由点单端主动广播，接单端订阅到就更新，异地也能同步。
+     *
+     * 3 分钟一次、只有配置了中转才发，避免无谓流量。
+     */
+    private void scheduleMenuBroadcast() {
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable[] self = new Runnable[1];
+        self[0] = new Runnable() {
+            public void run() {
+                if (act == null || act.isFinishing()) {
+                    return;
+                }
+                if (com.couple.xiaowo.core.Relay.enabled(act)) {
+                    new Thread(new Runnable() {
+                        public void run() {
+                            try {
+                                com.couple.xiaowo.core.Relay.publish(act,
+                                        Protocol.ROLE_ORDER, Menu.toJson(), 8000);
+                            } catch (Exception ignore) {
+                            }
+                        }
+                    }).start();
+                }
+                h.postDelayed(self[0], MENU_BROADCAST_MS);
+            }
+        };
+        // 启动后先等 20 秒（让首屏和服务先稳定），之后周期性广播
+        h.postDelayed(self[0], 20000L);
+    }
+
     private void scheduleAutoPeerUpdate() {
         // 不自动检查。更新一律由用户在「我」页手动触发。
     }
@@ -1577,6 +1616,7 @@ public class OrderScreen extends LinearLayout {
                 return true;
             }
         });
+        love.setContentDescription("撒一把爱心，长按撒更多");
         LinearLayout.LayoutParams loveLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         loveLp.topMargin = dp(16);
@@ -1596,19 +1636,27 @@ public class OrderScreen extends LinearLayout {
     private View buildNav() {
         LinearLayout nav = Ui.horizontal(act);
         nav.setBackgroundColor(Theme.adapt(0xFFFFFFFF));
-        nav.setPadding(0, dp(7), 0, dp(7));
+        // 分隔线：深色主题下纯白底和页面背景会糊在一起，加一条极淡的顶边
+        nav.setPadding(0, dp(6), 0, dp(6));
         for (int i = 0; i < 5; i++) {
             final int index = i;
             LinearLayout tabView = Ui.vertical(act);
             tabView.setGravity(Gravity.CENTER);
-            TextView icon = Ui.tv(act, TAB_ICON[i], 17, 0xFF9B96A8, false);
+            // 触摸目标：整块至少 52dp 高（规范 ≥48dp），图标也一并放大
+            tabView.setMinimumHeight(dp(52));
+            tabView.setPadding(0, dp(4), 0, dp(4));
+
+            TextView icon = Ui.tv(act, TAB_ICON[i], 19, 0xFF9B96A8, false);
             icon.setGravity(Gravity.CENTER);
+            // emoji 是装饰性的，屏幕阅读器读"房子"这种没意义，交给父容器读页面名
+            icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
             tabView.addView(icon);
-            TextView label = Ui.tv(act, TAB_NAME[i], 9.5f, 0xFF9B96A8, false);
+
+            TextView label = Ui.tv(act, TAB_NAME[i], 10.5f, 0xFF9B96A8, false);
             label.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lLp.topMargin = dp(2);
+            lLp.topMargin = dp(3);
             tabView.addView(label, lLp);
             navIcons[i] = icon;
             navLabels[i] = label;
@@ -1617,6 +1665,8 @@ public class OrderScreen extends LinearLayout {
                     switchTab(index);
                 }
             });
+            // 无障碍：整块读出「厨房，标签页」，并标注当前选中
+            tabView.setContentDescription(TAB_NAME[i] + "页面");
             LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(0,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
             tLp.weight = 1f;
@@ -1901,6 +1951,7 @@ public class OrderScreen extends LinearLayout {
 
             TextView count = Ui.tv(act, String.valueOf(qty), 13, Ui.PURPLE, true);
             count.setGravity(Gravity.CENTER);
+            count.setContentDescription("已选 " + qty + " 份");
             LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1934,14 +1985,19 @@ public class OrderScreen extends LinearLayout {
      * @param widthPx 宽度；高度固定，宽度按文字量给（「＋」窄、「选规格」宽）
      */
     private TextView rectBtn(String text, int bg, int fg, int widthPx) {
-        TextView t = Ui.tv(act, text, text.length() > 1 ? 11.5f : 16f, fg, true);
+        TextView t = Ui.tv(act, text, text.length() > 1 ? 12f : 16f, fg, true);
         t.setGravity(Gravity.CENTER);
         t.setBackground(Ui.round(bg, dp(10)));
         t.setMinWidth(widthPx);
         t.setPadding(dp(10), dp(6), dp(10), dp(6));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(30));
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(36));
         t.setLayoutParams(lp);
+        // 规范：图标/符号按钮必须有可读的无障碍名称
+        t.setContentDescription("＋".equals(text) ? "增加一份"
+                : "−".equals(text) ? "减少一份" : text);
+        // 视觉高度 36dp，热区补到 44dp，手指更好点
+        Ui.expandTouch(t, 44);
         return t;
     }
 
@@ -2264,9 +2320,28 @@ public class OrderScreen extends LinearLayout {
         }
         if (orderBtn != null) {
             boolean can = count > 0 && !sending;
-            orderBtn.setBackground(Ui.round(can ? Ui.PURPLE : 0xFFD9D4E6, dp(999)));
+            /*
+             * 注意：按钮文字要区分模式。
+             * 选菜进冰箱时应该是「加入冰箱」，不能被更新购物车时改回「下单」
+             * （这是本轮改动里自己引入过的一个 bug，这里一并守住）。
+             */
+            String label;
+            int normalBg;
+            if (pickingForFridge) {
+                label = "加入冰箱";
+                normalBg = Ui.ACCENT;
+            } else {
+                label = sending ? "投递中…" : "下单";
+                normalBg = Ui.PURPLE;
+            }
+            orderBtn.setBackground(Ui.round(can ? normalBg : 0xFFD9D4E6, dp(999)));
             orderBtn.setTextColor(can ? 0xFFFFFFFF : 0xFF9A95A8);
-            orderBtn.setText(sending ? "投递中…" : "下单");
+            orderBtn.setText(label);
+
+            // 冰箱模式下副标题也换成对应说明
+            if (subTotalView != null && pickingForFridge) {
+                subTotalView.setText(count == 0 ? "挑一道菜囤起来" : ("已选 " + count + " 道 · 点右边加入冰箱"));
+            }
         }
     }
     private void updateNav() {
@@ -2338,7 +2413,7 @@ public class OrderScreen extends LinearLayout {
             String day = d.format(new Date(m.ts));
             if (!day.equals(lastDay)) {
                 lastDay = day;
-                TextView dl = Ui.tv(act, day, 9.5f, Ui.TEXT_MUTED, false);
+                TextView dl = Ui.tv(act, day, 10.5f, Ui.TEXT_MUTED, false);
                 dl.setGravity(Gravity.CENTER);
                 dl.setPadding(0, dp(8), 0, dp(4));
                 chatBox.addView(dl, new LinearLayout.LayoutParams(
@@ -2394,7 +2469,14 @@ public class OrderScreen extends LinearLayout {
         rebuildChat();
         new Thread(new Runnable() {
             public void run() {
-                tryPost(Protocol.PATH_CHAT, m.toJson());
+                final boolean ok = tryPost(Protocol.PATH_CHAT, m.toJson());
+                if (!ok) {
+                    act.runOnUiThread(new Runnable() {
+                        public void run() {
+                            toastWarn("消息没发出去：检查网络或「连接设置」里的配对");
+                        }
+                    });
+                }
             }
         }).start();
     }
@@ -2412,6 +2494,11 @@ public class OrderScreen extends LinearLayout {
                 sp.edit().putString("peer_host", p.host).putInt("peer_port", p.port).apply();
                 return true;
             }
+        }
+        // 最后一档：走中转（异地时这是唯一通路）
+        if (com.couple.xiaowo.core.Relay.enabled(act)) {
+            return com.couple.xiaowo.core.Relay.publish(act,
+                    Protocol.ROLE_ORDER, body, 8000);
         }
         return Protocol.isOk(Net.post("127.0.0.1", Net.DEFAULT_PORT, path, body, 1200));
     }
@@ -2543,7 +2630,7 @@ public class OrderScreen extends LinearLayout {
         specs.setHint("规格，用顿号或逗号分开（可留空）");
         specs.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         box.addView(specs, top(8));
-        box.addView(Ui.tv(act, "多个规格用顿号、逗号或空格分开", 9.5f, Ui.TEXT_MUTED, false), top(3));
+        box.addView(Ui.tv(act, "多个规格用顿号、逗号或空格分开", 10.5f, Ui.TEXT_MUTED, false), top(3));
 
         DialogKit.custom(act, "改「" + it.name + "」", box, "保存", new Runnable() {
             public void run() {

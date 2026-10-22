@@ -142,7 +142,7 @@ public final class ConnectPage {
                 btn.setEnabled(false);
                 btn.setText("查找中…");
                 status.setText("正在广播…");
-                status.setTextColor(Ui.TEXT_MUTED);
+                status.setTextColor(Theme.adaptText(Ui.TEXT_MUTED));
                 new Thread(new Runnable() {
                     public void run() {
                         final java.util.List<Net.Peer> peers = Net.discover(2200);
@@ -217,7 +217,7 @@ public final class ConnectPage {
                     probe.setEnabled(false);
                     probe.setText("测试中…");
                     status.setText("正在连接对方…");
-                    status.setTextColor(Ui.TEXT_MUTED);
+                    status.setTextColor(Theme.adaptText(Ui.TEXT_MUTED));
                     SharedPreferences sp = act.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
                     String h = sp.getString("peer_host", null);
                     int p = sp.getInt("peer_port", 0);
@@ -333,7 +333,7 @@ public final class ConnectPage {
                     String code = Relay.newPairing(act);
                     copyToClipboard(act, code);
                     status.setText("当前房间：" + code + "（已配对，已复制）");
-                    status.setTextColor(Ui.PRIMARY_DEEP);
+                    status.setTextColor(Theme.adaptText(Ui.PRIMARY_DEEP));
                     rebuild.run();
                     if (onChanged != null) {
                         onChanged.run();

@@ -267,7 +267,7 @@ public final class KeepAliveCard {
             h.okRow.setVisibility(View.VISIBLE);
             h.badge.setText("已完成");
             h.badge.setBackground(Ui.round(Ui.SUCCESS_SOFT, dp(act, 999)));
-            h.badge.setTextColor(Ui.SUCCESS);
+            h.badge.setTextColor(Theme.adaptText(Ui.SUCCESS));
             h.subtitle.setVisibility(View.GONE);
             return;
         }
@@ -276,7 +276,7 @@ public final class KeepAliveCard {
         h.okRow.setVisibility(View.GONE);
         h.badge.setText(missing + " 项待确认");
         h.badge.setBackground(Ui.round(Ui.WARN_SOFT, dp(act, 999)));
-        h.badge.setTextColor(Ui.WARN);
+        h.badge.setTextColor(Theme.adaptText(Ui.WARN));
         h.subtitle.setVisibility(View.VISIBLE);
         h.subtitle.setText("开启下面这些之后，即使不打开 App 也能正常收到消息。");
 
@@ -330,7 +330,7 @@ public final class KeepAliveCard {
         cLp.leftMargin = dp(act, 9);
         col.setLayoutParams(cLp);
         col.addView(Ui.tv(act, title, 12.5f, Ui.TEXT, true));
-        col.addView(Ui.tv(act, hint, 9.5f, Ui.TEXT_SUB, false), top(act, 2));
+        col.addView(Ui.tv(act, hint, 10.5f, Ui.TEXT_SUB, false), top(act, 2));
         row.addView(col);
 
         row.addView(Ui.tv(act, "›", 15, Ui.TEXT_MUTED, false));
@@ -440,7 +440,7 @@ public final class KeepAliveCard {
             LinearLayout col = (LinearLayout) row.getChildAt(1);
             TextView t = (TextView) col.getChildAt(0);
             t.setText(title);
-            t.setTextColor(titleColor);
+            t.setTextColor(Theme.adaptText(titleColor));
             TextView h = (TextView) col.getChildAt(1);
             h.setText(hint);
         } catch (Exception ignore) {
@@ -464,7 +464,7 @@ public final class KeepAliveCard {
         cLp.leftMargin = dp(act, 9);
         col.setLayoutParams(cLp);
         col.addView(Ui.tv(act, title, 12f, titleColor, true));
-        TextView h = Ui.tv(act, hint, 9.5f, Ui.TEXT_SUB, false);
+        TextView h = Ui.tv(act, hint, 10.5f, Ui.TEXT_SUB, false);
         h.setLineSpacing(dp(act, 1.5f), 1f);
         col.addView(h, top(act, 2));
         row.addView(col);
