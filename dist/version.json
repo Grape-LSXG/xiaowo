@@ -1,20 +1,20 @@
 {
-  "versionCode": 33,
-  "versionName": "3.7.5",
+  "versionCode": 34,
+  "versionName": "3.7.6",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "修「软件包无效」：下载/缓存复用现在校验完整性与真实大小，安装前再验一次 ZIP 完整性，并清掉历史残包",
+  "notes": "修保活状态卡片自相矛盾（卡片在 sync 之前就建好，读到的永远是旧状态）：状态行改为可刷新，sync 后收敛到真实值",
   "order": {
-    "versionCode": 33,
-    "versionName": "3.7.5",
+    "versionCode": 34,
+    "versionName": "3.7.6",
     "url": "",
-    "size": 771427
+    "size": 775523
   },
   "recv": {
-    "versionCode": 33,
-    "versionName": "3.7.5",
+    "versionCode": 34,
+    "versionName": "3.7.6",
     "url": "",
-    "size": 6313469
+    "size": 6317565
   },
-  "size": 771427
+  "size": 775523
 }
