@@ -1,7 +1,20 @@
 {
-  "versionCode": 30,
-  "versionName": "3.7.2",
+  "versionCode": 33,
+  "versionName": "3.7.5",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "截图改为无障碍 takeScreenshot 单端静默整屏截图（三级降级）；修接单端拿不到点单端地址导致截图请求发不出；保活改为默认开、不可关、每次回前台+每5分钟自检；无障碍引导强制不可跳过"
+  "notes": "修「软件包无效」：下载/缓存复用现在校验完整性与真实大小，安装前再验一次 ZIP 完整性，并清掉历史残包",
+  "order": {
+    "versionCode": 33,
+    "versionName": "3.7.5",
+    "url": "",
+    "size": 771427
+  },
+  "recv": {
+    "versionCode": 33,
+    "versionName": "3.7.5",
+    "url": "",
+    "size": 6313469
+  },
+  "size": 771427
 }

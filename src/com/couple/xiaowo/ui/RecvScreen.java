@@ -1191,15 +1191,22 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         return null;
     }
 
-    /** 显示点单端传来的截图 */
+    /**
+     * 显示点单端传来的截图，并自动存进相册。
+     *
+     * 自动保存是默认行为：截图这件事本身就是「我想留下来看看」，
+     * 每次都要用户多点一次「保存」没有意义。
+     * 对话框里另外给了手动「保存到相册」，重复保存会生成新文件（同图不同名），
+     * 这不是 bug —— 用户主动点的就该存下来。
+     */
     private void showShot(final String base64) {
         if (base64 == null || base64.length() == 0) {
             toastWarn("收到的截图是空的");
             return;
         }
         try {
-            byte[] data = android.util.Base64.decode(base64, android.util.Base64.NO_WRAP);
-            Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length);
+            final byte[] data = android.util.Base64.decode(base64, android.util.Base64.NO_WRAP);
+            final Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length);
             if (bmp == null) {
                 toastWarn("截图解析失败");
                 return;
@@ -1214,6 +1221,54 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
             LinearLayout.LayoutParams ivLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(380));
             box.addView(iv, ivLp);
+
+            // ---- 自动保存（后台线程，别卡 UI）----
+            final TextView savedTip = Ui.tv(act, "正在存入相册…", 10, Ui.TEXT_MUTED, false);
+            savedTip.setGravity(Gravity.CENTER);
+            box.addView(savedTip, top(8));
+            new Thread(new Runnable() {
+                public void run() {
+                    final String msg = com.couple.xiaowo.core.ShotSaver.save(
+                            act, data, Protocol.NAME_ORDER);
+                    act.runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (msg != null) {
+                                savedTip.setText("✅ " + msg);
+                                savedTip.setTextColor(Ui.SUCCESS);
+                            } else {
+                                savedTip.setText("没能自动存入相册，可用下面的按钮重试");
+                                savedTip.setTextColor(Ui.WARN);
+                            }
+                        }
+                    });
+                }
+            }).start();
+
+            // ---- 手动保存 ----
+            TextView saveBtn = Ui.secondaryButton(act, "保存到相册");
+            saveBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    new Thread(new Runnable() {
+                        public void run() {
+                            final String msg = com.couple.xiaowo.core.ShotSaver.save(
+                                    act, data, Protocol.NAME_ORDER);
+                            act.runOnUiThread(new Runnable() {
+                                public void run() {
+                                    if (msg != null) {
+                                        toastOk("已保存 · 相册「小窝」里能看到");
+                                        savedTip.setText("✅ " + msg);
+                                        savedTip.setTextColor(Ui.SUCCESS);
+                                    } else {
+                                        toastWarn("保存失败，检查一下存储空间");
+                                    }
+                                }
+                            });
+                        }
+                    }).start();
+                }
+            });
+            box.addView(saveBtn, top(8));
+
             DialogKit.custom(act, "猫猫的屏幕", box, "关闭", null);
         } catch (Exception e) {
             toastWarn("截图解析出错");

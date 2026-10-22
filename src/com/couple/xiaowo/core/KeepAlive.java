@@ -181,6 +181,15 @@ public final class KeepAlive extends Service {
 
     public static void start(Context c, String role, String hint) {
         try {
+            /*
+             * 乐观置位：startForegroundService 是异步的，服务要等系统调度才执行
+             * onStartCommand。界面如果在这几十毫秒里查状态，会看到「没在跑」——
+             * 实测就是这么显示出自相矛盾的状态的。
+             *
+             * 这里先置 true，真正的失败（比如通知权限不够导致
+             * startForeground 抛异常）会在 onStartCommand/onDestroy 里改回 false。
+             */
+            running = true;
             Intent i = new Intent(c, KeepAlive.class);
             i.putExtra(EXTRA_ROLE, role);
             i.putExtra(EXTRA_HINT, hint);

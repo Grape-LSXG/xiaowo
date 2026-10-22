@@ -202,6 +202,8 @@ public class MainActivity extends Activity implements HeartHost {
         maybeAskLocalNetwork();
         AlertCenter.SystemNotify.request(this);
         com.couple.xiaowo.core.Updater.ensureDefault(this);
+        // 清掉老版本留下的可能不完整的 APK 缓存（一次性）
+        com.couple.xiaowo.core.Updater.purgeStaleDownloads(this);
         setupAmbient();
         startRelay();
 

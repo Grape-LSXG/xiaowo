@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.couple.xiaowo.order"
-    android:versionCode="30"
-    android:versionName="3.7.2">
+    android:versionCode="33"
+    android:versionName="3.7.5">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
@@ -21,6 +21,15 @@
     <!-- 自动更新：下载新版本后调起系统安装器 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
+        接单端保存收到的截图到相册。
+        Android 10+ 走 MediaStore 完全不需要这个权限；
+        这里声明并加 maxSdkVersion，只为照顾 Android 9 及以下的老机器，
+        且不会在 10+ 上向用户索要（系统直接忽略）。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <!-- 前台服务保活（Android 14+ 必须声明类型） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- Android 16/17 的「本地网络」权限：老系统上写进清单也无害 -->
@@ -53,28 +62,20 @@
             android:foregroundServiceType="dataSync" />
 
         <!--
-            单端静默截屏：无障碍服务。
+            静默截屏：无障碍服务。**只打进点单端**（@SHOT_SERVICE@ 在 build.sh 里按角色替换）。
 
-            为什么是无障碍：Android 11 (API 30) 给 AccessibilityService 加了
-            takeScreenshot()，只要配置里声明 canTakeScreenshot="true" 并处于运行状态，
-            就能**直接拿到整屏 Bitmap，没有任何确认弹窗**。
-            MediaProjection 每次都要用户点「开始录制」，做不到静默。
+            为什么只有点单端需要：
+              截图的方向是「接单端请求 → 点单端的屏幕」。被截的那一端才是
+              需要无障碍的那一端。接单端只负责显示收到的图，它自己的屏幕
+              没人要看，给它塞一个无障碍服务只会多一项要用户授权的敏感权限。
 
-            授权只做一次：用户在系统设置 → 无障碍里勾选本服务，之后永久有效。
-            metadata 指向 res/xml/shot_service.xml。
+            为什么用无障碍：Android 11 (API 30) 给 AccessibilityService 加了
+            takeScreenshot()，配置里声明 canTakeScreenshot="true" 并处于运行状态时，
+            能直接拿到整屏 Bitmap，没有任何确认弹窗。MediaProjection 做不到静默。
+
+            授权只做一次，metadata 指向 res/xml/shot_service.xml。
         -->
-        <service
-            android:name="com.couple.xiaowo.core.ShotService"
-            android:exported="true"
-            android:label="@APP_LABEL@·静默截屏"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/shot_service" />
-        </service>
+        @SHOT_SERVICE@
 
         <!-- 自动更新用：把下载好的 APK 以 content:// 交给系统安装器 -->
         <provider

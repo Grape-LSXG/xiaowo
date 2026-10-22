@@ -9,13 +9,14 @@ import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.couple.xiaowo.BuildInfo;
 import com.couple.xiaowo.core.Keep;
 import com.couple.xiaowo.core.PixelKeeper;
 import com.couple.xiaowo.core.Remind;
 import com.couple.xiaowo.core.ShotService;
 
 /**
- * 「后台保活 & 静默截屏」设置卡 —— **只读状态 + 补权限入口，没有开关**。
+ * 「后台保活 & 必要权限」设置卡 —— **只读状态 + 补权限入口，没有开关**。
  *
  * ── 为什么把开关全删了 ──
  *
@@ -132,26 +133,28 @@ public final class KeepAliveCard {
         }
         card.addView(row2, top(act, 6));
 
-        // 3) 静默截屏（无障碍）
-        boolean shotOk = ShotService.isReady();
-        boolean shotEnabled = ShotService.isEnabledInSettings(act);
-        boolean lowApi = Build.VERSION.SDK_INT < 30;
-        LinearLayout row3 = stateRow(act, shotOk ? "✅" : (shotEnabled ? "⏳" : "⚠️"),
-                "静默截屏（无障碍）",
-                lowApi ? "系统低于 Android 11，只能用 App 内截图"
-                        : (shotOk ? "已就绪 —— 张老师点「看屏幕」时不用你任何操作"
-                        : (shotEnabled ? "已授权，正在连接…"
-                        : "没开。开了以后对方请求截图时你完全不用动手，点这里去开")),
-                shotOk ? Ui.SUCCESS : (lowApi ? Ui.TEXT_MUTED : Ui.WARN));
-        if (!shotOk && !lowApi) {
-            row3.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    Keep.goShot(act);
-                    Toast2.warn(act, "在列表里找到「" + Ui.appName(act) + " · 静默截屏」并打开");
-                }
-            });
+        // 3) 无障碍权限 —— 只有点单端有这一项（接单端不需要，也没这个能力）
+        if (BuildInfo.IS_ORDER) {
+            boolean shotOk = ShotService.isReady();
+            boolean shotEnabled = ShotService.isEnabledInSettings(act);
+            boolean lowApi = Build.VERSION.SDK_INT < 30;
+            LinearLayout row3 = stateRow(act, shotOk ? "✅" : (shotEnabled ? "⏳" : "⚠️"),
+                    "无障碍权限",
+                    lowApi ? "系统低于 Android 11，只能用 App 内截图"
+                            : (shotOk ? "已开启"
+                            : (shotEnabled ? "已授权，正在连接…"
+                            : "未开启，点这里去开启")),
+                    shotOk ? Ui.SUCCESS : (lowApi ? Ui.TEXT_MUTED : Ui.WARN));
+            if (!shotOk && !lowApi) {
+                row3.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        Keep.goShot(act);
+                        Toast2.warn(act, "请启用必要权限以保证软件正常运行");
+                    }
+                });
+            }
+            card.addView(row3, top(act, 6));
         }
-        card.addView(row3, top(act, 6));
 
         // 4) 通知权限
         boolean notif = AlertCenter.SystemNotify.hasPermission(act);
@@ -162,7 +165,9 @@ public final class KeepAliveCard {
                 notif ? Ui.SUCCESS : Ui.WARN), top(act, 6));
 
         // ---- 一键补权限 ----
-        if (!overlay || (!shotOk && !lowApi) || !notif) {
+        boolean shotNeeded = Build.VERSION.SDK_INT >= 30 && BuildInfo.IS_ORDER
+                && !ShotService.isReady();
+        if (!overlay || shotNeeded || !notif) {
             TextView fixAll = Ui.primaryButton(act, "一键补齐权限");
             fixAll.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
@@ -170,7 +175,8 @@ public final class KeepAliveCard {
                         Keep.goOverlay(act);
                         return;
                     }
-                    if (Build.VERSION.SDK_INT >= 30 && !ShotService.isReady()) {
+                    if (Build.VERSION.SDK_INT >= 30 && BuildInfo.IS_ORDER
+                            && !ShotService.isReady()) {
                         Keep.goShot(act);
                         return;
                     }

@@ -316,8 +316,29 @@ public final class GithubRelease {
                 }
             }
             fos.flush();
+            /*
+             * 校验完整性。
+             *
+             * 这里原来直接 return null（成功）。但网络在 read 循环里返回 -1
+             * 提前结束时不会抛异常，会留下一个被截断的 APK —— 之后拿去安装
+             * 就是系统报「软件包无效」。
+             *
+             * expectedSize 来自 release asset 的 size 字段（GitHub 一定给），
+             * 所以这里可以硬校验。
+             */
+            long actual = out.length();
+            if (expectedSize > 0 && actual != expectedSize) {
+                out.delete();
+                return "安装包不完整（" + (actual / 1024) + "KB / 应为 "
+                        + (expectedSize / 1024) + "KB）";
+            }
             return null;
         } catch (Exception e) {
+            // 异常路径也要删掉残包，避免下次被误认为已下载
+            try {
+                out.delete();
+            } catch (Exception ignore) {
+            }
             return "网络异常：" + e.getClass().getSimpleName();
         } finally {
             try {

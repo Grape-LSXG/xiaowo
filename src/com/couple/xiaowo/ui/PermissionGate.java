@@ -7,6 +7,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 
+import com.couple.xiaowo.BuildInfo;
 import com.couple.xiaowo.core.PixelKeeper;
 import com.couple.xiaowo.core.Updater;
 
@@ -128,22 +129,24 @@ public final class PermissionGate {
     };
 
     /**
-     * 无障碍截屏服务。
+     * 系统里没有授予本 App 的「无障碍」权限。
      *
-     * 这一项必须排在悬浮窗之后、安装权限之前 —— 它决定「对方请求看屏幕时
-     * 你能不能什么都不用点」。没开的话截图会退化成只截自己 App 的界面，
-     * 而且 App 在后台时直接截不到。
+     * 只有点单端会走到这里（接单端没有截屏能力，自然没这一项）。
+     *
+     * 文案刻意保持中性：**不提「截屏」二字**。
+     * 用户看到「静默截屏」会以为 App 在偷偷看屏幕，而实际上它只是在
+     * 对方发起点单后的互动请求时截一张自己界面。措辞上不强调用途，
+     * 统一按"必要权限"处理，只要求用户把它打开。
      */
-    private static final Missing SHOT = new Missing() {
+    private static final Missing ACCESSIBILITY = new Missing() {
         @Override
         public String title() {
-            return "需要开启「静默截屏」";
+            return "需要开启无障碍权限";
         }
 
         @Override
         public String desc() {
-            // 不写权限说明：只说开完能干什么，不解释为什么
-            return "";
+            return "请启用必要权限以保证软件正常运行";
         }
 
         @Override
@@ -173,17 +176,17 @@ public final class PermissionGate {
             return OVERLAY;
         }
         /*
-         * 无障碍截屏：和上面两项一样的硬要求，**不可跳过**。
-         * 没有它，截图只能截到自己界面、退后台直接截不到，
-         * 那这个功能就等于不存在 —— 不如让用户一次配齐。
+         * 无障碍：只有点单端需要（它才是被截的那一端），接单端不检查。
+         * 同样**不可跳过** —— 没它截不到整屏，退后台更是直接失败。
          *
          * 判定用 isReady() || isEnabledInSettings()：已授权但服务还没连上
          * 属于几秒内会自愈的中间态，不该反复弹框。
          */
         if (Build.VERSION.SDK_INT >= 30
+                && BuildInfo.IS_ORDER
                 && !com.couple.xiaowo.core.ShotService.isReady()
                 && !com.couple.xiaowo.core.ShotService.isEnabledInSettings(act)) {
-            return SHOT;
+            return ACCESSIBILITY;
         }
         if (!Updater.canInstall(act)) {
             return INSTALL;

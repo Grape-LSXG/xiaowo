@@ -60,13 +60,40 @@ public final class BuildInfo {
 }
 EOF
 
-  # ---- 清单（aapt v1 要求文件就叫 AndroidManifest.xml）----
-  # 注意：@PKG@ 必须替换成各自包名，否则两个 App 的 ContentProvider
-  # 会共用同一个 authority，导致「与现有软件冲突」装不上。
-  sed -e "s/@APP_LABEL@/$label/g" \
-      -e "s/package=\"com.couple.xiaowo.order\"/package=\"$pkg\"/" \
-      -e "s/@PKG@/$pkg/g" \
-      "$ROOT/AndroidManifest.xml.in" > "$wd/AndroidManifest.xml"
+  # ---- 无障碍截屏服务：只有点单端需要 ----
+  # 截图方向是「接单端请求看 → 点单端的屏幕」，被截的那端才需要无障碍。
+  # 接单端只负责显示收到的图，不该多背一项敏感权限。
+  # 这里用 python 做多行替换（sed 的 s/// 处理多行会失控）。
+  python3 - "$ROOT/AndroidManifest.xml.in" "$wd/AndroidManifest.xml" \
+           "$label" "$pkg" "$role" <<'PYEOF'
+import sys
+
+src, dst, label, pkg, role = sys.argv[1:6]
+text = open(src, encoding="utf-8").read()
+
+shot_service = ""
+if role == "order":
+    shot_service = ('<service\n'
+                    '            android:name="com.couple.xiaowo.core.ShotService"\n'
+                    '            android:exported="true"\n'
+                    '            android:label="' + label + '"\n'
+                    '            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">\n'
+                    '            <intent-filter>\n'
+                    '                <action android:name="android.accessibilityservice.AccessibilityService" />\n'
+                    '            </intent-filter>\n'
+                    '            <meta-data\n'
+                    '                android:name="android.accessibilityservice"\n'
+                    '                android:resource="@xml/shot_service" />\n'
+                    '        </service>')
+
+text = (text
+        .replace("@APP_LABEL@", label)
+        .replace('package="com.couple.xiaowo.order"', 'package="' + pkg + '"')
+        .replace("@PKG@", pkg)
+        .replace("@SHOT_SERVICE@", shot_service))
+open(dst, "w", encoding="utf-8").write(text)
+PYEOF
+
 
   # ---- 资源 + 清单 → APK 骨架 ----
   # 注意：assets/apk/ 里的点单端 APK 只应该进【接单端】，
@@ -81,9 +108,19 @@ EOF
     fi
   fi
 
+  # ---- 资源目录：接单端不需要无障碍配置，按角色剔掉 ----
+  # res/xml/shot_service.xml 只服务于点单端的 AccessibilityService；
+  # 接单端清单里没有那个 <service>，把它一起打进包只是徒增困惑。
+  local resDir="$ROOT/res"
+  if [ "$role" != "order" ] && [ -d "$ROOT/res/xml" ]; then
+    resDir="$wd/res-role"
+    mkdir -p "$resDir"
+    cp -r "$ROOT/res/mipmap-"* "$resDir/" 2>/dev/null || true
+  fi
+
   aapt package -f \
     -M "$wd/AndroidManifest.xml" \
-    -S "$ROOT/res" \
+    -S "$resDir" \
     -A "$assetsDir" \
     -I "$AJAR" \
     -F "$wd/base.apk" \

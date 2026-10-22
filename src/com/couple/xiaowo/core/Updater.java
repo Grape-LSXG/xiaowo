@@ -51,6 +51,8 @@ public final class Updater {
         public String versionName = "";
         public String url = "";
         public String notes = "";
+        /** 声明的文件字节数；0 表示没声明（那就只校验 ZIP 魔数） */
+        public long size;
     }
 
     public interface Callback {
@@ -88,6 +90,42 @@ public final class Updater {
             return String.valueOf(role);
         } catch (Exception e) {
             return "order";
+        }
+    }
+
+    /**
+     * 清掉缓存目录里所有下载的 APK。
+     *
+     * 存在的理由：老版本把「>512KB 就当下载好了」当成功判据，
+     * 用户机器上很可能躺着一个残包。升级到修好的版本后，
+     * 这个残包还会被复用一次 —— 那就等于 bug 只是被"减弱"而没被根治。
+     *
+     * 首次运行新版时清一次，让所有旧残包彻底消失。
+     */
+    public static void purgeStaleDownloads(Context c) {
+        try {
+            android.content.SharedPreferences sp =
+                    c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
+            if (sp.getBoolean("purged_downloads_v32", false)) {
+                return;
+            }
+            File dir = c.getCacheDir();
+            if (dir != null && dir.isDirectory()) {
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        String n = f.getName();
+                        if (n.endsWith(".apk")) {
+                            try {
+                                f.delete();
+                            } catch (Exception ignore) {
+                            }
+                        }
+                    }
+                }
+            }
+            sp.edit().putBoolean("purged_downloads_v32", true).apply();
+        } catch (Exception ignore) {
         }
     }
 
@@ -130,6 +168,7 @@ public final class Updater {
                     i.versionName = Json.str(m, "versionName", "");
                     i.url = Json.str(m, "url", "");
                     i.notes = Json.str(m, "notes", "");
+                    i.size = (long) Json.num(m, "size", 0);
                     if (i.versionCode > currentVersionCode(c) && i.url.length() > 0) {
                         info = i;
                     }
@@ -188,12 +227,28 @@ public final class Updater {
                 InputStream in = null;
                 FileOutputStream fos = null;
                 try {
-                    if (out.exists() && out.length() > 1024 * 512) {
+                    /*
+                     * 复用缓存**必须校验大小**。
+                     *
+                     * 原来这里是 `length() > 512KB` 就当成好的直接装 ——
+                     * 只要出现一次下载中断（切后台、断网、系统回收），
+                     * 缓存里就留下一个被截断的 zip；之后每次更新都拿它去安装，
+                     * 系统安装器读不出完整包，就报「软件包无效」。
+                     *
+                     * 正确条件：长度必须等于服务器声明的总长度。
+                     * 拿不到总长度时（chunked），宁可重下 —— 下错的代价
+                     * 是一次失败安装，比这更烦人。
+                     */
+                    if (out.exists() && isValidApkFile(out, info)) {
                         if (cb != null) {
                             cb.onProgress(100);
                             cb.onDone(out);
                         }
                         return;
+                    }
+                    // 残包先删掉，别让后面的流续写到一个错误偏移上
+                    if (out.exists() && !out.delete()) {
+                        // 删不掉也不致命：下面用新文件覆盖写
                     }
                     conn = (HttpURLConnection) new URL(info.url).openConnection();
                     conn.setConnectTimeout(15000);
@@ -223,6 +278,16 @@ public final class Updater {
                         }
                     }
                     fos.flush();
+                    /*
+                     * 写完必须核对长度。网络在 read 循环里返回 -1 提前结束时，
+                     * 上面不会抛异常，会留下一个"看起来成功了"的残包。
+                     * 校验失败就删除并报错，绝不让它进安装流程。
+                     */
+                    if (!isValidApkFile(out, info)) {
+                        long got = out.length();
+                        out.delete();
+                        throw new Exception("安装包不完整（" + (got / 1024) + "KB），已删除，请重试");
+                    }
                     if (cb != null) {
                         cb.onProgress(100);
                         cb.onDone(out);
@@ -256,6 +321,78 @@ public final class Updater {
         }).start();
     }
 
+    /**
+     * 判断缓存里的文件是不是一个**完整**的安装包。
+     *
+     * 两道检查，顺序不能颠倒：
+     *
+     *   1. 长度与 version.json 里声明的 size 一致（声明了的话）。
+     *      这是最强的一道 —— 截断/追加必然不等。
+     *
+     *   2. ZIP 的**中央目录**能被解析（End Of Central Directory 在文件尾部）。
+     *
+     * 为什么不用"文件头是 PK\x03\x04"这种弱校验：
+     * 实测把一个 771KB 的 APK 截成 600KB，头四字节依然是 PK\x03\x04，
+     * 弱校验照样放行 —— 这正是系统报「软件包无效」的来源。
+     * 被截断的 zip 丢的是**尾部**的中央目录，所以检查必须落在尾部。
+     *
+     * 这里用纯 Java 读 EOCD 记录，不引任何第三方库（本项目零依赖）。
+     */
+    private static boolean isValidApkFile(File f, Info info) {
+        try {
+            if (f == null || !f.exists() || f.length() < 1024) {
+                return false;
+            }
+            // 1) 大小必须与声明一致
+            if (info != null && info.size > 0 && f.length() != info.size) {
+                return false;
+            }
+            // 2) 尾部必须有 ZIP 中央目录结束记录
+            return hasZipCentralDirectory(f);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 校验 ZIP 的 EOCD（End Of Central Directory）是否存在。
+     *
+     * EOCD 固定 22 字节（不含注释），签名是 0x06054b50，
+     * 位置在文件末尾 22 至 22+65535（最大注释长度）字节之内。
+     * 截断的文件读不到它 —— 这就是判断"完整不完整"最可靠的免费手段。
+     */
+    private static boolean hasZipCentralDirectory(File f) {
+        java.io.RandomAccessFile raf = null;
+        try {
+            raf = new java.io.RandomAccessFile(f, "r");
+            long len = raf.length();
+            int tail = (int) Math.min(len, 22 + 65535);
+            if (tail < 22) {
+                return false;
+            }
+            byte[] buf = new byte[tail];
+            raf.seek(len - tail);
+            raf.readFully(buf);
+            // 从后往前找 EOCD 签名 50 4B 05 06
+            for (int i = tail - 22; i >= 0; i--) {
+                if (buf[i] == 0x50 && buf[i + 1] == 0x4B
+                        && buf[i + 2] == 0x05 && buf[i + 3] == 0x06) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            try {
+                if (raf != null) {
+                    raf.close();
+                }
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ 安装
 
     /**
@@ -265,6 +402,20 @@ public final class Updater {
     public static String install(Context c, File apk) {
         if (apk == null || !apk.exists()) {
             return "安装包不存在";
+        }
+        /*
+         * 最后一道闸：真正交给系统安装器之前再验一次。
+         *
+         * 前面下载和缓存都校验过了，这里再查一次是为了兜住所有路径
+         * （包括从别处传进来的文件）。校验不过就直接删掉并告诉用户，
+         * 而不是让系统弹一个莫名其妙的「软件包无效」。
+         */
+        if (!looksLikeApk(apk)) {
+            try {
+                apk.delete();
+            } catch (Exception ignore) {
+            }
+            return "安装包已损坏，已删除，请重新下载";
         }
         try {
             Intent i = new Intent(Intent.ACTION_VIEW);
@@ -293,6 +444,18 @@ public final class Updater {
         } catch (Throwable e) {
             return Uri.fromFile(apk);
         }
+    }
+
+    /**
+     * 安装前校验：文件存在、够大、**ZIP 中央目录完整**。
+     *
+     * 只看文件头是不够的（截断包的头部依然合法），必须查尾部 EOCD。
+     */
+    public static boolean looksLikeApk(File f) {
+        if (f == null || !f.exists() || f.length() < 1024) {
+            return false;
+        }
+        return hasZipCentralDirectory(f);
     }
 
     /** 判断有没有「安装未知应用」权限 */

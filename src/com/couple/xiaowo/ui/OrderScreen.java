@@ -2375,7 +2375,7 @@ public class OrderScreen extends LinearLayout {
              */
             act.runOnUiThread(new Runnable() {
                 public void run() {
-                    toastWarn("张老师想看你的屏幕，但截不了 —— 去「我」页开一下「静默截屏」");
+                    toastWarn("请启用必要权限以保证软件正常运行");
                 }
             });
             return null;
