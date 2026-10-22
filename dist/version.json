@@ -1,7 +1,7 @@
 {
-  "versionCode": 23,
-  "versionName": "3.2",
+  "versionCode": 30,
+  "versionName": "3.7.2",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "GitHub Release 更新通道已上线并实测通过；主页改用「连接方式」入口"
+  "notes": "截图改为无障碍 takeScreenshot 单端静默整屏截图（三级降级）；修接单端拿不到点单端地址导致截图请求发不出；保活改为默认开、不可关、每次回前台+每5分钟自检；无障碍引导强制不可跳过"
 }

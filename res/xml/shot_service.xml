@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  静默截屏用的无障碍服务配置。
+
+  android:canTakeScreenshot="true" 是 API 30 起 AccessibilityService.takeScreenshot()
+  的前置条件 —— 没有这一项，系统会直接抛 SecurityException。
+
+  刻意不开 canRetrieveWindowContent：截屏不需要读取界面内容，
+  权限越小越好，用户看到「读取屏幕内容」也会更犹豫。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:canTakeScreenshot="true"
+    android:accessibilityFlags="flagDefault"
+    android:notificationTimeout="100" />

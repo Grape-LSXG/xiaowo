@@ -191,12 +191,23 @@ public class MainActivity extends Activity implements HeartHost {
 
         setContentView(root);
         applyInsets(root);
+        /*
+         * 保活总闸：前台服务 + 一像素窗一起拉起来。
+         * 这一步不再有"用户开没开"的判断 —— 保活是不可关闭的，
+         * KeepAliveCard.sync 内部会把所有手段补齐（缺权限时返回 true）。
+         */
         KeepAliveCard.sync(this, !BuildInfo.IS_ORDER, null);
+        // 定时自检：每 5 分钟确认服务/一像素窗还在，掉了自己拉回来
+        com.couple.xiaowo.core.Keep.startWatchdog(this);
         maybeAskLocalNetwork();
         AlertCenter.SystemNotify.request(this);
         com.couple.xiaowo.core.Updater.ensureDefault(this);
         setupAmbient();
         startRelay();
+
+        // 启动时权限门：缺权限就弹引导。
+        // 放在 UI 建好之后调用，这样授权回来 recreate 时不会闪。
+        PermissionGate.ensure(this);
     }
 
     /**
@@ -326,6 +337,21 @@ public class MainActivity extends Activity implements HeartHost {
             ambient.start();
         }
         /*
+         * 用户从授权页回来时再次检查权限。
+         * 全部就绪才放行；否则继续弹不可取消的引导框。
+         */
+        PermissionGate.ensure(this);
+
+        /*
+         * 授权悬浮窗回来后，把一像素保活窗拉起来。
+         * 这是"默认开启所有保活措施"的一部分 —— 用户一授权，保活就生效。
+         */
+        /*
+         * 每次回到前台都重新同步一次保活 —— 用户可能在系统设置里撤销了权限、
+         * 或者 ROM 把服务清了。这里补回来，做到「和权限一样经常检查」。
+         */
+        KeepAliveCard.sync(this, !BuildInfo.IS_ORDER, null);
+        /*
          * AUTO 模式下再异步读一次光校正。
          * 冷启动时 init() 用的是"上次记住的结论"，如果用户换了环境
          * （比如从被窝走到窗边），这里能立刻纠正过来，不用等传感器
@@ -337,10 +363,8 @@ public class MainActivity extends Activity implements HeartHost {
             }
         });
         // 回到前台：把常驻通知恢复成正常状态
-        if (KeepAliveCard.aliveEnabled(this)) {
-            KeepAlive.update(this, BuildInfo.IS_ORDER ? Protocol.ROLE_ORDER : Protocol.ROLE_RECV,
-                    BuildInfo.IS_ORDER ? "猫猫在线，正在等你接单" : "张老师在接单，随时可以点单");
-        }
+        KeepAlive.update(this, BuildInfo.IS_ORDER ? Protocol.ROLE_ORDER : Protocol.ROLE_RECV,
+                BuildInfo.IS_ORDER ? "猫猫在线，正在等你接单" : "张老师在接单，随时可以点单");
     }
 
     @Override
@@ -349,11 +373,9 @@ public class MainActivity extends Activity implements HeartHost {
         if (ambient != null) {
             ambient.stop();
         }
-        // 退到后台：把常驻通知缩成"后台运行中"，这就是「后台隐藏」
-        if (KeepAliveCard.aliveEnabled(this) && KeepAliveCard.hideEnabled(this)) {
-            KeepAlive.update(this, BuildInfo.IS_ORDER ? Protocol.ROLE_ORDER : Protocol.ROLE_RECV,
-                    "在后台运行中 · 点我回到小窝");
-        }
+        // 退到后台：把常驻通知缩成"后台运行中"（后台隐藏固定开启）
+        KeepAlive.update(this, BuildInfo.IS_ORDER ? Protocol.ROLE_ORDER : Protocol.ROLE_RECV,
+                "在后台运行中 · 点我回到小窝");
     }
 
     @Override

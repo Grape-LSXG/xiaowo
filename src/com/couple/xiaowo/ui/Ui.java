@@ -431,6 +431,23 @@ public final class Ui {
         }
     }
 
+    /** 应用显示名（清单里的 label），用于无障碍服务名的提示文案 */
+    public static String appName(Context c) {
+        try {
+            android.content.pm.ApplicationInfo ai = c.getApplicationInfo();
+            CharSequence label = c.getPackageManager().getApplicationLabel(ai);
+            if (label != null && label.length() > 0) {
+                return label.toString();
+            }
+        } catch (Exception ignore) {
+        }
+        try {
+            return c.getPackageName();
+        } catch (Exception e) {
+            return "小窝";
+        }
+    }
+
     public static int blend(int c1, int c2, float t) {
         int a = (int) (Color.alpha(c1) + (Color.alpha(c2) - Color.alpha(c1)) * t);
         int r = (int) (Color.red(c1) + (Color.red(c2) - Color.red(c1)) * t);

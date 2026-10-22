@@ -42,6 +42,26 @@ public final class KeepAlive extends Service {
 
     private PowerManager.WakeLock wakeLock;
 
+    /**
+     * 服务是否在跑 —— 进程内标记。
+     *
+     * 为什么不用 ActivityManager.getRunningServices()：
+     * Android 8.0 起它只返回**本应用**的服务，看起来够用；但实测在
+     * Android 17 (SDK 37) 的 vivo 上对一个非 debuggable 的 App 直接返回空列表，
+     * 于是界面上永远显示「没在跑」，用户被误导。
+     *
+     * 静态标记在这个场景下反而更准：
+     *   · 进程活着 + 服务在跑 → onStartCommand 置 true，读得到
+     *   · 进程被杀           → 静态变量跟着没，服务也一起没了，一致
+     *   · 用户/系统 stopService → onDestroy 置 false
+     * 唯一可能不一致的是「服务在跑但进程不是同一个」—— 不可能，服务就在本进程。
+     */
+    private static volatile boolean running;
+
+    public static boolean isRunning() {
+        return running;
+    }
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -86,13 +106,23 @@ public final class KeepAlive extends Service {
                     ? "正在等猫猫点单" : "正在等着张老师";
         }
         startForeground(NOTIF_ID, buildNotification(this, role, hint));
+        running = true;
         acquireWakeLock();
+        /*
+         * 一像素悬浮窗：这是"不用打开 App 也能收到"的关键。
+         * 只有前台通知时，系统仍会把 App 当后台冻结，网络回调被掐；
+         * 屏幕上有一个（哪怕不可见的）窗口，进程优先级就不一样了。
+         * 用户没给悬浮窗权限时 start() 会返回 false，此时退回纯前台服务。
+         */
+        PixelKeeper.start(this);
         // START_STICKY：被系统杀掉后尽量重启
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        running = false;
+        PixelKeeper.stop();
         releaseWakeLock();
         super.onDestroy();
     }

