@@ -1,7 +1,7 @@
 {
-  "versionCode": 23,
-  "versionName": "3.2",
+  "versionCode": 24,
+  "versionName": "3.3",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "GitHub Release 更新通道已上线并实测通过；主页改用「连接方式」入口"
+  "notes": "一像素悬浮窗保活（后台也能收到通知）；远程震动支持异地中转；主页改用连接方式入口"
 }
