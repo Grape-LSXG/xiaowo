@@ -138,6 +138,9 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
         // 启动后同步订单/聊天记录给对方（延迟，等双方服务起来）
         scheduleSyncPush();
+
+        // 使用中周期性检查 GitHub 更新（静默，偶尔试一次）
+        GitHubCard.startPeriodic(act, true);
     }
 
     private int dp(float v) {
@@ -2091,6 +2094,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
     }
 
     public void shutdown() {
+        GitHubCard.stopPeriodic();
         frpc.stop();
         stopListening();
     }
