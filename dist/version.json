@@ -1,7 +1,7 @@
 {
-  "versionCode": 25,
-  "versionName": "3.4",
+  "versionCode": 26,
+  "versionName": "3.5",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "自动更新：发现新版直接下载安装（不弹确认）；下载失败重试+备用域名；去掉自动检查开关（默认开启）；默认开启所有保活；启动时权限门强制授权"
+  "notes": "权限门去取消键+锁屏弹窗+vivo i管家引导；两端启动自动同步订单聊天；主题切换保持当前页；接单端可截图看点单端屏幕；换右上角图标"
 }
