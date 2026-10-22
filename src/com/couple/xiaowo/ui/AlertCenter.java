@@ -327,6 +327,17 @@ public final class AlertCenter {
                         .setAutoCancel(true)
                         .setContentIntent(pi);
 
+                // 锁屏也能全屏弹出（Android 10+，需要 USE_FULL_SCREEN_INTENT 权限，
+                // 且用户/vivo 系统允许「锁屏显示 + 后台弹出界面」）
+                if (Build.VERSION.SDK_INT >= 29 && love) {
+                    try {
+                        nb.setFullScreenIntent(pi, true);
+                    } catch (Exception ignore) {
+                    }
+                }
+                // 锁屏展示（Android 5+）：让内容直接出现在锁屏上
+                nb.setVisibility(Notification.VISIBILITY_PUBLIC);
+
                 if (Build.VERSION.SDK_INT >= 23) {
                     Bitmap big = heartBitmap(192, love);
                     if (big != null) {
