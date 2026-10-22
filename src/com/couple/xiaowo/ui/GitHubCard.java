@@ -79,31 +79,10 @@ public final class GitHubCard {
         });
         card.addView(repoRow);
 
-        // 打开 App 自动检查
-        final SharedPreferences sp = act.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
-        final boolean[] on = {GithubRelease.enabled(act)};
-        LinearLayout toggle = Ui.horizontal(act);
-        toggle.setGravity(Gravity.CENTER_VERTICAL);
-        toggle.setPadding(Ui.dpi(act, 8), Ui.dpi(act, 8), Ui.dpi(act, 8), Ui.dpi(act, 8));
-        final TextView box = Ui.tv(act, on[0] ? "☑" : "☐", 15,
-                on[0] ? Ui.PRIMARY : Ui.TEXT_MUTED, false);
-        toggle.addView(box);
-        TextView label = Ui.tv(act, "打开 App 时自动检查", 11, Ui.TEXT_SUB, false);
-        LinearLayout.LayoutParams lLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lLp.leftMargin = Ui.dpi(act, 8);
-        toggle.addView(label, lLp);
-        toggle.setClickable(true);
-        Ui.pressable(toggle);
-        toggle.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                on[0] = !on[0];
-                GithubRelease.setEnabled(act, on[0]);
-                box.setText(on[0] ? "☑" : "☐");
-                box.setTextColor(on[0] ? Ui.PRIMARY : Ui.TEXT_MUTED);
-            }
-        });
-        card.addView(toggle, top(act, 4));
+        // 说明：启动自动检查是默认行为，不再提供开关
+        card.addView(Ui.tv(act,
+                "每次打开 App 都会自动检查更新，有新版本就直接下载安装。",
+                10, Ui.TEXT_MUTED, false), top(act, 4));
         return card;
     }
 
@@ -140,7 +119,8 @@ public final class GitHubCard {
     /**
      * 检查并（可选）下载。
      *
-     * @param interactive 用户手动点的就多给反馈；自动检查时静默
+     * 需求变更：发现新版本后**直接下载并安装**，不再弹确认框。
+     * 所以 interactive 参数现在只影响"进度反馈显示在哪"，不再改变流程。
      */
     public static void run(final Activity act, final boolean isRecv,
                            final TextView status, final TextView btn,
@@ -178,27 +158,13 @@ public final class GitHubCard {
                             }
                             return;
                         }
+                        // 发现新版：直接下载并安装，不再弹确认框
                         if (status != null) {
                             status.setTextColor(Theme.adapt(Ui.PRIMARY_DEEP));
                             status.setText("发现新版 " + rel.versionName
-                                    + "（" + (rel.size / 1024) + " KB），点上面按钮更新");
+                                    + "（" + (rel.size / 1024) + " KB），开始下载…");
                         }
-                        /*
-                         * 自动检查（interactive=false）时不弹确认框 ——
-                         * 一开 App 就跳个对话框很打扰。
-                         * 只把提示留在卡片上，用户自己点「检查更新」时再弹。
-                         */
-                        if (!interactive) {
-                            return;
-                        }
-                        DialogKit.confirm(act, "发现新版本 " + rel.versionName,
-                                (rel.notes.length() > 0 ? rel.notes + "\n\n" : "")
-                                        + "现在下载并安装吗？",
-                                "下载", new Runnable() {
-                                    public void run() {
-                                        downloadAndInstall(act, rel, status);
-                                    }
-                                });
+                        downloadAndInstall(act, rel, status);
                     }
                 });
             }
