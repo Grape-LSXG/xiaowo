@@ -7,6 +7,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.os.Build;
@@ -27,6 +28,7 @@ import android.widget.Toast;
 
 import com.couple.xiaowo.core.ApkRelay;
 import com.couple.xiaowo.core.FrpcRunner;
+import com.couple.xiaowo.core.History;
 import com.couple.xiaowo.core.Json;
 import com.couple.xiaowo.core.Menu;
 import com.couple.xiaowo.core.Mqtt;
@@ -111,6 +113,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
                 savedPeer != null && savedPeer.toLowerCase().startsWith("https://"));
         this.notice = Social.parseNotice(sp.getString("notice", ""));
         chatLog.addAll(Social.parseMsgs(sp.getString("chat", "[]"), false));
+        orders.addAll(loadOrders());
         setOrientation(VERTICAL);
         setBackgroundColor(Theme.adapt(Ui.BG));
 
@@ -122,7 +125,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         addView(buildNav(), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        switchTab(TAB_KITCHEN);
+        switchTab(sp.getInt("cur_tab", TAB_KITCHEN));
         startListening();
 
         // 启动时自动检查 GitHub 更新（默认开启，发现新版直接下载安装）
@@ -132,6 +135,9 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
                 GitHubCard.run(act, true, null, null, false);
             }
         }, 1500);
+
+        // 启动后同步订单/聊天记录给对方（延迟，等双方服务起来）
+        scheduleSyncPush();
     }
 
     private int dp(float v) {
@@ -143,6 +149,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
     private void switchTab(int t) {
         tab = t;
+        sp.edit().putInt("cur_tab", t).apply();
         pageHost.removeAllViews();
         View page = pages[t];
         if (page == null || t != TAB_KITCHEN) {
@@ -808,6 +815,25 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
         }
         buzzCard.addView(buzzRow);
 
+        // ---- 看猫猫屏幕（截图）----
+        LinearLayout shotRow = Ui.horizontal(act);
+        shotRow.setGravity(Gravity.CENTER_VERTICAL);
+        shotRow.setPadding(0, dp(8), 0, 0);
+        TextView shotBtn = Ui.pill(act, "📸 看猫猫的屏幕", Ui.PRIMARY_SOFT,
+                Ui.PRIMARY_DEEP, 12, 14, 8, true);
+        shotBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                requestShot();
+            }
+        });
+        shotRow.addView(shotBtn);
+        TextView shotHint = Ui.tv(act, "让她截一张当前界面发过来", 10, Ui.TEXT_MUTED, false);
+        LinearLayout.LayoutParams shLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        shLp.leftMargin = dp(10);
+        shotRow.addView(shotHint, shLp);
+        buzzCard.addView(shotRow);
+
         ackView = Ui.tv(act, lastAckText.length() == 0 ? "还没收到猫猫的更新回执" : ("✅ " + lastAckText),
                 10, lastAckText.length() == 0 ? Ui.TEXT_MUTED : Ui.SUCCESS, false);
         LinearLayout.LayoutParams ackLp = new LinearLayout.LayoutParams(
@@ -1065,6 +1091,104 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
     }
 
     /** 让点单端震动。level: 0 轻 / 1 中 / 2 重 */
+    /** 「叫一下猫猫」—— 让点单端震动。 */
+    /**
+     * 请求点单端截一张屏幕发过来。
+     * 直连优先（HTTP 响应直接带回图），失败走中转（等 onRelayMessage 收图）。
+     */
+    private void requestShot() {
+        toast("让猫猫截屏中…");
+        new Thread(new Runnable() {
+            public void run() {
+                String host = sp.getString("peer_host", null);
+                int port = sp.getInt("peer_port", 0);
+                String img = null;
+                if (host != null && port > 0) {
+                    // 直连：POST /shot，响应就是 shotImg JSON
+                    String resp = Net.post(host, port, Protocol.PATH_SHOT,
+                            Protocol.shot(Protocol.NAME_RECV), 8000);
+                    img = extractShotImg(resp);
+                }
+                if (img != null) {
+                    final String fImg = img;
+                    act.runOnUiThread(new Runnable() {
+                        public void run() {
+                            showShot(fImg);
+                        }
+                    });
+                    return;
+                }
+                // 直连失败，走中转
+                if (Relay.enabled(act)) {
+                    if (Relay.publish(act, Protocol.ROLE_RECV,
+                            Protocol.shot(Protocol.NAME_RECV), 8000)) {
+                        act.runOnUiThread(new Runnable() {
+                            public void run() {
+                                toast("已向猫猫请求截图，等她截好传过来");
+                            }
+                        });
+                    } else {
+                        act.runOnUiThread(new Runnable() {
+                            public void run() {
+                                toastWarn("截图请求没发出去");
+                            }
+                        });
+                    }
+                } else {
+                    act.runOnUiThread(new Runnable() {
+                        public void run() {
+                            toastWarn("还没连上猫猫，也没配对中转");
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    /** 从 shotImg JSON 里抽出 base64 */
+    private String extractShotImg(String resp) {
+        if (resp == null) {
+            return null;
+        }
+        try {
+            Map<String, Object> m = Json.asObject(Json.parse(resp));
+            if (Protocol.TYPE_SHOT_IMG.equals(Json.str(m, "type", ""))) {
+                return Json.str(m, "img", "");
+            }
+        } catch (Exception ignore) {
+        }
+        return null;
+    }
+
+    /** 显示点单端传来的截图 */
+    private void showShot(final String base64) {
+        if (base64 == null || base64.length() == 0) {
+            toastWarn("收到的截图是空的");
+            return;
+        }
+        try {
+            byte[] data = android.util.Base64.decode(base64, android.util.Base64.NO_WRAP);
+            Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length);
+            if (bmp == null) {
+                toastWarn("截图解析失败");
+                return;
+            }
+            LinearLayout box = Ui.vertical(act);
+            box.setPadding(dp(8), dp(0), dp(8), dp(8));
+            ImageView iv = new ImageView(act);
+            iv.setImageBitmap(bmp);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            iv.setAdjustViewBounds(true);
+            // 限制展示尺寸，避免大图撑爆对话框
+            LinearLayout.LayoutParams ivLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(380));
+            box.addView(iv, ivLp);
+            DialogKit.custom(act, "猫猫的屏幕", box, "关闭", null);
+        } catch (Exception e) {
+            toastWarn("截图解析出错");
+        }
+    }
+
     /**
      * 「叫一下猫猫」—— 让点单端震动。
      *
@@ -1270,6 +1394,131 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
 
     private void saveChat() {
         sp.edit().putString("chat", Social.msgsToJson(chatLog)).apply();
+    }
+
+    /** 接单端订单本地持久化（同步功能的前提，之前是纯内存态、重启丢） */
+    private java.util.List<Protocol.Order> loadOrders() {
+        java.util.List<Protocol.Order> out = new java.util.ArrayList<Protocol.Order>();
+        String json = sp.getString("recv_orders", "[]");
+        Object o = Json.parse(json);
+        if (o instanceof java.util.List) {
+            for (Object it : (java.util.List<?>) o) {
+                Protocol.Order ord = Protocol.Order.fromJson(String.valueOf(it));
+                if (ord != null && ord.id != null && ord.id.length() > 0) {
+                    out.add(ord);
+                }
+            }
+        }
+        return out;
+    }
+
+    private void saveOrders() {
+        java.util.List<String> parts = new java.util.ArrayList<String>();
+        for (Protocol.Order o : orders) {
+            parts.add(o.toJson());
+        }
+        sp.edit().putString("recv_orders", Json.array(parts)).apply();
+    }
+
+    /** 把对方推来的订单+聊天合并进来（按 id/键 去重，幂等） */
+    private void mergeSync(com.couple.xiaowo.core.Sync.Parsed p) {
+        boolean changed = false;
+        // 合并订单：这里的"订单"是点单端视角的 History.Entry，
+        // 转成 Protocol.Order 存进 orders（展示层共用）
+        java.util.Set<Long> haveTs = new java.util.HashSet<Long>();
+        for (Protocol.Order o : orders) {
+            haveTs.add(o.ts);
+        }
+        for (History.Entry e : p.history) {
+            if (e.ts > 0 && !haveTs.contains(e.ts)) {
+                Protocol.Order ord = new Protocol.Order();
+                ord.id = "h" + e.ts;
+                ord.ts = e.ts;
+                ord.total = e.total;
+                ord.note = e.note;
+                ord.fromName = Protocol.NAME_ORDER;
+                for (Protocol.Line l : e.lines) {
+                    ord.lines.add(l);
+                }
+                orders.add(ord);
+                haveTs.add(e.ts);
+                changed = true;
+            }
+        }
+        // 合并聊天
+        java.util.Set<String> chatKeys = new java.util.HashSet<String>();
+        for (Social.Msg m : chatLog) {
+            chatKeys.add(m.who + "|" + m.ts + "|" + m.text);
+        }
+        for (Social.Msg m : p.chat) {
+            String key = m.who + "|" + m.ts + "|" + m.text;
+            if (!chatKeys.contains(key)) {
+                chatLog.add(m);
+                chatKeys.add(key);
+                changed = true;
+            }
+        }
+        if (changed) {
+            java.util.Collections.sort(orders, new java.util.Comparator<Protocol.Order>() {
+                public int compare(Protocol.Order a, Protocol.Order b) {
+                    return Long.compare(b.ts, a.ts);
+                }
+            });
+            java.util.Collections.sort(chatLog, new java.util.Comparator<Social.Msg>() {
+                public int compare(Social.Msg a, Social.Msg b) {
+                    return Long.compare(a.ts, b.ts);
+                }
+            });
+            while (chatLog.size() > 200) {
+                chatLog.remove(0);
+            }
+            saveOrders();
+            saveChat();
+            pages[TAB_KITCHEN] = null;
+            pages[TAB_ORDERS] = null;
+            pages[TAB_ME] = null;
+            if (tab == TAB_KITCHEN || tab == TAB_ORDERS || tab == TAB_ME) {
+                switchTab(tab);
+            }
+        }
+    }
+
+    /** 启动后把本地订单+聊天推给对方 */
+    private void scheduleSyncPush() {
+        postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                pushSync();
+            }
+        }, 2500);
+    }
+
+    private void pushSync() {
+        // 把自己的数据编码：订单转 History.Entry 形态 + 聊天
+        java.util.List<History.Entry> hist = new java.util.ArrayList<History.Entry>();
+        for (Protocol.Order o : orders) {
+            History.Entry e = new History.Entry();
+            e.ts = o.ts;
+            e.total = o.total;
+            e.note = o.note;
+            e.delivered = true;
+            e.lines.addAll(o.lines);
+            hist.add(e);
+        }
+        final String body = com.couple.xiaowo.core.Sync.build(hist, chatLog);
+        new Thread(new Runnable() {
+            public void run() {
+                boolean ok = false;
+                String host = sp.getString("peer_host", null);
+                int port = sp.getInt("peer_port", 0);
+                if (host != null && port > 0) {
+                    ok = Protocol.isOk(Net.post(host, port, Protocol.PATH_SYNC, body, 3000));
+                }
+                if (!ok && Relay.enabled(act)) {
+                    ok = Relay.publish(act, Protocol.ROLE_RECV, body, 8000);
+                }
+            }
+        }).start();
     }
 
     private View rowAccent(String k, String v) {
@@ -1504,6 +1753,19 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
                             "role", Json.quote(Protocol.ROLE_RECV),
                             "port", String.valueOf(server == null ? 0 : server.port())));
                 }
+                if (Protocol.PATH_SYNC.equals(path)) {
+                    final com.couple.xiaowo.core.Sync.Parsed p =
+                            com.couple.xiaowo.core.Sync.parse(body);
+                    if (p != null) {
+                        act.runOnUiThread(new Runnable() {
+                            public void run() {
+                                mergeSync(p);
+                            }
+                        });
+                        return Protocol.ack(true, Protocol.ROLE_RECV, "记录已同步");
+                    }
+                    return Protocol.ack(false, Protocol.ROLE_RECV, "同步数据格式不对");
+                }
                 return Protocol.ack(false, Protocol.ROLE_RECV, "unknown path");
             }
         });
@@ -1572,6 +1834,16 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
             } else if (ApkRelay.PATH_ORDER.equals(type)) {
                 // 点单端要更新包：中转传不了 6MB，告诉它改用直连
                 replyApkDenied(payload);
+            } else if (Protocol.TYPE_SYNC.equals(type)) {
+                final com.couple.xiaowo.core.Sync.Parsed p =
+                        com.couple.xiaowo.core.Sync.parse(payload);
+                if (p != null) {
+                    mergeSync(p);
+                }
+            } else if (Protocol.TYPE_SHOT_IMG.equals(type)) {
+                // 点单端从中转回传的截图
+                final String base64 = Json.str(Json.asObject(Json.parse(payload)), "img", "");
+                showShot(base64);
             }
         } catch (Exception ignore) {
         }
@@ -1744,6 +2016,7 @@ public class RecvScreen extends LinearLayout implements TunnelPanel.Host {
             }
         }
         orders.add(0, o);
+        saveOrders();
         // 厨房页是缓存复用的，新订单进来要让它重建，"最近一单"才会更新
         pages[TAB_KITCHEN] = null;
         switchTab(tab);
