@@ -82,27 +82,28 @@ public class MakeIcon {
         g.setColor(new Color(0x3A3546));
         float eyeDx = headW * 0.20f;
         float eyeCy = hy + headH * 0.02f;
-        float rx = headW * 0.115f;
-        float ry = headH * 0.135f;
+        float rx = headW * 0.130f;
+        float ry = headH * 0.150f;
 
-        // 眼白
+        // 眼白：白脸用纯白会看不见边界，但也别加灰 —— 加了会像戴眼镜。
+        // 靠瞳孔和上眼皮来表达「斜眼」，眼白只当作一层底色。
         g.setColor(Color.WHITE);
         g.fill(new Ellipse2D.Float(cx - eyeDx - rx, eyeCy - ry, rx * 2, ry * 2));
         g.fill(new Ellipse2D.Float(cx + eyeDx - rx, eyeCy - ry, rx * 2, ry * 2));
 
         // 瞳孔：两只一起往右偏 → 斜眼
         g.setColor(new Color(0x3A3546));
-        float pupR = rx * 0.42f;
-        float pupOffX = rx * 0.34f;
-        float pupOffY = ry * 0.42f;
+        float pupR = rx * 0.60f;
+        float pupOffX = rx * 0.40f;
+        float pupOffY = ry * 0.46f;
         g.fill(new Ellipse2D.Float(cx - eyeDx + pupOffX - pupR, eyeCy + pupOffY - pupR, pupR * 2, pupR * 2));
         g.fill(new Ellipse2D.Float(cx + eyeDx + pupOffX - pupR, eyeCy + pupOffY - pupR, pupR * 2, pupR * 2));
 
         // 上眼皮：倾斜粗线压住眼睛上半部 = 半眯斜眼
         g.setColor(new Color(0x3A3546));
         g.setStroke(new BasicStroke(s * 0.026f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        float lidY1 = eyeCy - ry * 0.86f;
-        float lidY2 = eyeCy - ry * 0.40f;
+        float lidY1 = eyeCy - ry * 0.92f;
+        float lidY2 = eyeCy - ry * 0.50f;
         Path2D lidL = new Path2D.Float();
         lidL.moveTo(cx - eyeDx - rx * 0.95f, lidY2);
         lidL.lineTo(cx - eyeDx + rx * 0.95f, lidY1);
