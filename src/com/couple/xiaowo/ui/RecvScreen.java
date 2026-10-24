@@ -1613,8 +1613,10 @@ public class RecvScreen extends LinearLayout {
                     }
                 }
                 if (!ok && com.couple.xiaowo.core.Relay.enabled(act)) {
+                    // 第二个参数是「发送方角色」，不是消息类型 —— 传错会让接收端
+                    // 判断不出是谁发的，所以这里必须是 ROLE_RECV。
                     ok = com.couple.xiaowo.core.Relay.publish(act,
-                            Protocol.TYPE_MENU, body, 8000);
+                            Protocol.ROLE_RECV, body, 8000);
                 }
                 final boolean done = ok;
                 act.runOnUiThread(new Runnable() {
