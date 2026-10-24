@@ -1219,8 +1219,15 @@ public class RecvScreen extends LinearLayout {
         String body = m.toJson();
         // 多台点单端在线时，先给"心跳里报过地址"的每一台都送一份，
         // 否则只有最近下单的那台能收到消息，另一台像被晾着
+        //
+        // 这里跑在网络线程，而在线表是主线程在增删的 —— 先拷一份再遍历，
+        // 否则正好撞上心跳写入就会 ConcurrentModificationException。
+        java.util.List<PeerClient> targets;
+        synchronized (orderClients) {
+            targets = new java.util.ArrayList<PeerClient>(orderClients.values());
+        }
         int delivered = 0;
-        for (PeerClient c : orderClients.values()) {
+        for (PeerClient c : targets) {
             if (c.host == null || c.host.length() == 0 || c.port <= 0) {
                 continue;
             }
@@ -2289,22 +2296,26 @@ public class RecvScreen extends LinearLayout {
         }
         act.runOnUiThread(new Runnable() {
             public void run() {
-                PeerClient c = orderClients.get(id);
-                boolean isNew = c == null;
-                if (isNew) {
-                    c = new PeerClient();
-                    c.id = id;
-                    orderClients.put(id, c);
+                PeerClient c;
+                boolean isNew;
+                synchronized (orderClients) {
+                    c = orderClients.get(id);
+                    isNew = c == null;
+                    if (isNew) {
+                        c = new PeerClient();
+                        c.id = id;
+                        orderClients.put(id, c);
+                    }
+                    c.name = (name == null || name.length() == 0) ? Protocol.NAME_ORDER : name;
+                    if (host != null && host.length() > 0) {
+                        c.host = host;
+                    }
+                    if (port > 0) {
+                        c.port = port;
+                    }
+                    c.seen = System.currentTimeMillis();
+                    pruneClients();
                 }
-                c.name = (name == null || name.length() == 0) ? Protocol.NAME_ORDER : name;
-                if (host != null && host.length() > 0) {
-                    c.host = host;
-                }
-                if (port > 0) {
-                    c.port = port;
-                }
-                c.seen = System.currentTimeMillis();
-                pruneClients();
                 refreshClients();
                 if (isNew && tab == TAB_KITCHEN) {
                     // 多了一台点单端，给个轻提示，方便调试时确认
@@ -2317,11 +2328,13 @@ public class RecvScreen extends LinearLayout {
     /** 把超过 90 秒没心跳的从在线表里去掉 */
     private void pruneClients() {
         long now = System.currentTimeMillis();
-        java.util.Iterator<Map.Entry<String, PeerClient>> it =
-                orderClients.entrySet().iterator();
-        while (it.hasNext()) {
-            if (now - it.next().getValue().seen > CLIENT_TTL_MS) {
-                it.remove();
+        synchronized (orderClients) {
+            java.util.Iterator<Map.Entry<String, PeerClient>> it =
+                    orderClients.entrySet().iterator();
+            while (it.hasNext()) {
+                if (now - it.next().getValue().seen > CLIENT_TTL_MS) {
+                    it.remove();
+                }
             }
         }
     }
@@ -2332,15 +2345,17 @@ public class RecvScreen extends LinearLayout {
             return;
         }
         pruneClients();
-        if (orderClients.isEmpty()) {
-            clientsText.setText("📱 点单端：还没有谁在线");
-            clientsText.setTextColor(Theme.adapt(Ui.TEXT_MUTED));
-            return;
-        }
-        StringBuilder sb = new StringBuilder("📱 点单端：");
-        sb.append(orderClients.size()).append(" 个在线");
-        for (PeerClient c : orderClients.values()) {
-            sb.append("　·　").append(c.name);
+        StringBuilder sb = new StringBuilder();
+        synchronized (orderClients) {
+            if (orderClients.isEmpty()) {
+                clientsText.setText("📱 点单端：还没有谁在线");
+                clientsText.setTextColor(Theme.adapt(Ui.TEXT_MUTED));
+                return;
+            }
+            sb.append("📱 点单端：").append(orderClients.size()).append(" 个在线");
+            for (PeerClient c : orderClients.values()) {
+                sb.append("　·　").append(c.name);
+            }
         }
         clientsText.setText(sb.toString());
         clientsText.setTextColor(Theme.adapt(0xFF16A34A));
