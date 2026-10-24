@@ -55,6 +55,11 @@ import java.util.Map;
  */
 public class RecvScreen extends LinearLayout {
 
+    /** 周期性任务统一 Handler；shutdown() 里一次性掐掉（原地换主题会重建屏幕） */
+    private final android.os.Handler sched =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean dead = false;
+
     /** 定时拉菜谱的周期（2 分钟） */
     private static final long AUTO_REFRESH_MENU_MS = 2 * 60 * 1000L;
 
@@ -63,6 +68,20 @@ public class RecvScreen extends LinearLayout {
     private static final int TAB_FRIDGE = 2;
     private static final int TAB_MANAGE = 3;
     private static final int TAB_ME = 4;
+
+    /** 在线点单端的心跳有效期（心跳 25 秒一次，留足三个周期的余量） */
+    private static final long CLIENT_TTL_MS = 90 * 1000L;
+    /** 扫一遍在线点单端的周期 */
+    private static final long CLIENT_TICK_MS = 15 * 1000L;
+
+    /** 一台在线点单端 */
+    private static final class PeerClient {
+        String id = "";
+        String name = "";
+        String host = "";
+        int port = 0;
+        long seen = 0L;
+    }
 
     private static final String[] TAB_ICON = {"🏠", "🧾", "🧊", "📖", "😊"};
     private static final String[] TAB_NAME = {"厨房", "订单", "冰箱", "管理", "我"};
@@ -83,6 +102,16 @@ public class RecvScreen extends LinearLayout {
     private TextView connectHint;
     private TextView tsText;
     private TextView relayText;
+    /** 首页卡片里「现在几个点单端在线」那一行 */
+    private TextView clientsText;
+    /**
+     * 在线点单端：设备编号 → 记录。
+     *
+     * 以前接单端只有"最近一单"的概念，同时登两台点单端时
+     * 完全看不出谁在线、几个在线（用户就提了这个）。
+     */
+    private final java.util.LinkedHashMap<String, PeerClient> orderClients =
+            new java.util.LinkedHashMap<String, PeerClient>();
     /** 配对状态变了要让状态卡重建一次 */
     private Runnable statusCardDirty;
 
@@ -130,6 +159,7 @@ public class RecvScreen extends LinearLayout {
 
         switchTab(sp.getInt("cur_tab", TAB_KITCHEN));
         startListening();
+        scheduleClientTick();
         // 定时自动拉最新菜谱（同 Wi-Fi 直连拉；异地靠点单端广播，见 onRelayMessage）
         scheduleMenuAutoRefresh();
 
@@ -401,6 +431,15 @@ public class RecvScreen extends LinearLayout {
             }
         });
         card.addView(relayText, top(6));
+        // 交给 MainActivity 跟着真实订阅状态刷新（原来这里建完就再也没人改它，
+        // 所以配对了也永远显示「未配对」——用户报的就是这个）
+        if (act instanceof MainActivity) {
+            ((MainActivity) act).bindRelayStatus(relayText, "🌐 异地中转：");
+        }
+
+        // ---- 现在有几个点单端连着（多端点单/自己调试时看这里）----
+        clientsText = Ui.tv(act, "📱 点单端：0 个在线", 10.5f, Ui.TEXT_MUTED, false);
+        card.addView(clientsText, top(4));
 
         TextView hint = Ui.tv(act, "同一个 Wi-Fi：猫猫留空就能自动找到你\n"
                         + "异地：让猫猫连同一个 Tailscale 账号，填上面的地址",
@@ -1178,6 +1217,22 @@ public class RecvScreen extends LinearLayout {
     /** 接单端发消息给点单端：订单里带过 replyHost，但聊天是随时发的，所以用发现兜底 */
     private boolean sendChatToCat(Social.Msg m) {
         String body = m.toJson();
+        // 多台点单端在线时，先给"心跳里报过地址"的每一台都送一份，
+        // 否则只有最近下单的那台能收到消息，另一台像被晾着
+        int delivered = 0;
+        for (PeerClient c : orderClients.values()) {
+            if (c.host == null || c.host.length() == 0 || c.port <= 0) {
+                continue;
+            }
+            if (Protocol.isOk(Net.post(c.host, c.port, Protocol.PATH_CHAT, body, 2500))
+                    || Protocol.isOk(Net.post("127.0.0.1", c.port,
+                    Protocol.PATH_CHAT, body, 1200))) {
+                delivered++;
+            }
+        }
+        if (delivered > 0) {
+            return true;
+        }
         String savedHost = sp.getString("peer_host", null);
         int savedPort = sp.getInt("peer_port", 0);
         if (savedHost != null && savedPort > 0) {
@@ -1761,11 +1816,11 @@ public class RecvScreen extends LinearLayout {
      * 静默进行，只在真有变化时提示。
      */
     private void scheduleMenuAutoRefresh() {
-        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final android.os.Handler h = sched;
         final Runnable[] self = new Runnable[1];
         self[0] = new Runnable() {
             public void run() {
-                if (act == null || act.isFinishing()
+                if (dead || act == null || act.isFinishing()
                         || (android.os.Build.VERSION.SDK_INT >= 17 && act.isDestroyed())) {
                     return;
                 }
@@ -1987,6 +2042,13 @@ public class RecvScreen extends LinearLayout {
                     return Net.Blob.apk(apk);
                 }
 
+                if (Protocol.PATH_PRESENCE.equals(path)) {
+                    // 点单端的心跳：记下这台设备 + 它的回信地址
+                    Map<String, Object> m = Json.asObject(Json.parse(body));
+                    touchClient(Json.str(m, "id", ""), Json.str(m, "name", ""),
+                            Json.str(m, "host", ""), (int) Json.num(m, "port", 0));
+                    return Protocol.ack(true, Protocol.ROLE_RECV, "知道你在");
+                }
                 if (Protocol.PATH_ORDER.equals(path)) {
                     final Protocol.Order o = Protocol.Order.fromJson(body);
                     act.runOnUiThread(new Runnable() {
@@ -2121,7 +2183,11 @@ public class RecvScreen extends LinearLayout {
      */
     public void onRelayMessage(String type, String payload) {
         try {
-            if (Protocol.TYPE_ORDER.equals(type)) {
+            if (Protocol.TYPE_PRESENCE.equals(type)) {
+                Map<String, Object> m = Json.asObject(Json.parse(payload));
+                touchClient(Json.str(m, "id", ""), Json.str(m, "name", ""),
+                        Json.str(m, "host", ""), (int) Json.num(m, "port", 0));
+            } else if (Protocol.TYPE_ORDER.equals(type)) {
                 onOrderArrived(Protocol.Order.fromJson(payload));
             } else if (Protocol.TYPE_CHAT.equals(type)) {
                 onChatIncoming(Social.Msg.fromJson(payload));
@@ -2206,6 +2272,99 @@ public class RecvScreen extends LinearLayout {
         }
         listenPort = 0;
         updateStatus(false, 0);
+    }
+
+    // ============================================================ 在线点单端
+
+    /**
+     * 记一笔"这台点单端刚说话"。
+     *
+     * 心跳、订单、中转里的 presence 都会走到这里 —— 只要它还活着，
+     * 90 秒内就一直算在线。以后要区分"哪台点了什么"也全靠这个编号。
+     */
+    private void touchClient(final String id, final String name,
+                             final String host, final int port) {
+        if (id == null || id.length() == 0) {
+            return;
+        }
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                PeerClient c = orderClients.get(id);
+                boolean isNew = c == null;
+                if (isNew) {
+                    c = new PeerClient();
+                    c.id = id;
+                    orderClients.put(id, c);
+                }
+                c.name = (name == null || name.length() == 0) ? Protocol.NAME_ORDER : name;
+                if (host != null && host.length() > 0) {
+                    c.host = host;
+                }
+                if (port > 0) {
+                    c.port = port;
+                }
+                c.seen = System.currentTimeMillis();
+                pruneClients();
+                refreshClients();
+                if (isNew && tab == TAB_KITCHEN) {
+                    // 多了一台点单端，给个轻提示，方便调试时确认
+                    Toast2.info(act, c.name + " 连上了");
+                }
+            }
+        });
+    }
+
+    /** 把超过 90 秒没心跳的从在线表里去掉 */
+    private void pruneClients() {
+        long now = System.currentTimeMillis();
+        java.util.Iterator<Map.Entry<String, PeerClient>> it =
+                orderClients.entrySet().iterator();
+        while (it.hasNext()) {
+            if (now - it.next().getValue().seen > CLIENT_TTL_MS) {
+                it.remove();
+            }
+        }
+    }
+
+    /** 刷新首页卡片上「几个点单端在线」那一行 */
+    private void refreshClients() {
+        if (clientsText == null) {
+            return;
+        }
+        pruneClients();
+        if (orderClients.isEmpty()) {
+            clientsText.setText("📱 点单端：还没有谁在线");
+            clientsText.setTextColor(Theme.adapt(Ui.TEXT_MUTED));
+            return;
+        }
+        StringBuilder sb = new StringBuilder("📱 点单端：");
+        sb.append(orderClients.size()).append(" 个在线");
+        for (PeerClient c : orderClients.values()) {
+            sb.append("　·　").append(c.name);
+        }
+        clientsText.setText(sb.toString());
+        clientsText.setTextColor(Theme.adapt(0xFF16A34A));
+    }
+
+    /** 每 15 秒扫一遍：掉线的剔掉、显示刷一下（没有心跳就永远"在线"是假的） */
+    private void scheduleClientTick() {
+        final android.os.Handler h = sched;
+        final Runnable[] self = new Runnable[1];
+        self[0] = new Runnable() {
+            public void run() {
+                if (dead || act == null || act.isFinishing()) {
+                    return;
+                }
+                refreshClients();
+                h.postDelayed(self[0], CLIENT_TICK_MS);
+            }
+        };
+        h.postDelayed(self[0], CLIENT_TICK_MS);
+    }
+
+    /** 中转状态变了 —— 首页的状态行由 MainActivity 直接绑着刷，这里只更新人数行 */
+    public void onRelayState() {
+        refreshClients();
     }
 
     private void updateStatus(boolean running, int port) {
@@ -2331,6 +2490,8 @@ public class RecvScreen extends LinearLayout {
     }
 
     private void onOrderArrived(final Protocol.Order o) {
+        // 下单本身也算"这台点单端在线"（老版本没有 fromId，就记不下编号，忽略即可）
+        touchClient(o.fromId, o.fromName, o.replyHost, o.replyPort);
         // 去重：客户端读响应超时后会带同一个 id 重发，
         // 这时单其实已经收下了，不能记两遍。
         if (o.id != null && o.id.length() > 0) {
@@ -2416,6 +2577,8 @@ public class RecvScreen extends LinearLayout {
     }
 
     public void shutdown() {
+        dead = true;
+        sched.removeCallbacksAndMessages(null);
         GitHubCard.stopPeriodic();
         stopListening();
     }

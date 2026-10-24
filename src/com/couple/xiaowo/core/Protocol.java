@@ -36,6 +36,8 @@ public final class Protocol {
     public static final String TYPE_UPDATE_ACK = "updateAck";
     public static final String TYPE_BUZZ = "buzz";
     public static final String TYPE_HERE = "here";
+    /** 点单端 → 接单端：我还在线（多台点单端时用来数人数） */
+    public static final String TYPE_PRESENCE = "presence";
     public static final String TYPE_SYNC = "sync";
     public static final String TYPE_SHOT = "shot";
     public static final String TYPE_SHOT_IMG = "shotImg";
@@ -49,6 +51,8 @@ public final class Protocol {
     public static final String PATH_CHAT = "/chat";
     /** 点单端 → 接单端：菜谱同步 */
     public static final String PATH_MENU = "/menu";
+    /** 点单端 → 接单端：在线心跳（带设备编号和回信地址） */
+    public static final String PATH_PRESENCE = "/presence";
     /** 点单端 → 接单端：安装回执（确认点单端真的更新成功了） */
     public static final String PATH_ACK_UPDATE = "/update/ack";
     /** 接单端 → 点单端：远程震动指令 */
@@ -112,6 +116,11 @@ public final class Protocol {
         public long ts = 0L;
         public int total = 0;
         public String fromName = "小窝·点单";
+        /**
+         * 下单的是哪台点单端（见 Client）。
+         * 老版本没有这个字段，所以读的时候允许为空 —— 空就只当"点单端"。
+         */
+        public String fromId = "";
         public String replyHost = "";
         public int replyPort = 0;
         public final List<Line> lines = new ArrayList<Line>();
@@ -132,6 +141,7 @@ public final class Protocol {
                     "id", Json.quote(id),
                     "from", Json.quote(ROLE_ORDER),
                     "fromName", Json.quote(fromName),
+                    "fromId", Json.quote(fromId),
                     "ts", String.valueOf(ts),
                     "note", Json.quote(note),
                     "total", String.valueOf(total),
@@ -167,6 +177,7 @@ public final class Protocol {
             o.ts = Json.num(m, "ts", System.currentTimeMillis());
             o.total = (int) Json.num(m, "total", 0);
             o.fromName = Json.str(m, "fromName", "小窝·点单");
+            o.fromId = Json.str(m, "fromId", "");
             o.replyHost = Json.str(m, "replyHost", "");
             o.replyPort = (int) Json.num(m, "replyPort", 0);
             for (Object it : Json.list(m, "items")) {
@@ -263,6 +274,23 @@ public final class Protocol {
                 "type", Json.quote(TYPE_DISCOVER),
                 "role", Json.quote(ROLE_ORDER),
                 "name", Json.quote("小窝·点单")));
+    }
+
+    /**
+     * 点单端的在线心跳。
+     *
+     * 带上自己的回信地址（host/port）是有意的：接单端要按"在线的那几台"
+     * 逐个发消息，只靠"最近一单的 replyHost"在多台点单端时会漏人。
+     */
+    public static String presence(String id, String name, String host, int port) {
+        return Json.object(Json.fields(
+                "type", Json.quote(TYPE_PRESENCE),
+                "role", Json.quote(ROLE_ORDER),
+                "id", Json.quote(id),
+                "name", Json.quote(name),
+                "host", Json.quote(host),
+                "port", String.valueOf(port),
+                "ts", String.valueOf(System.currentTimeMillis())));
     }
 
     public static String here(String name, int port) {

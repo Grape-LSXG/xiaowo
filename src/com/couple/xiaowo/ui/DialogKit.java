@@ -9,11 +9,14 @@ import android.graphics.drawable.GradientDrawable;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.util.TypedValue;
+import android.os.Build;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
@@ -80,12 +83,21 @@ public final class DialogKit {
     private static final int DUR_IN = 240;
     /** 退场：略微缩回 + 淡出 */
     private static final int DUR_OUT = 150;
+    /** 底部面板进场：上滑 + 遮罩淡入 */
+    private static final int SHEET_IN = 260;
+    /** 面板内容最多占屏高（剩下的留给"我看得见背景里的列表"） */
+    private static final float SHEET_MAX_RATIO = 0.68f;
+    /** 下滑超过这个距离就关（不到则弹回去） */
+    private static final float SHEET_DRAG_CLOSE_DP = 80f;
 
     /** Dialog → 卡片，退场动画的目标；弱引用，不把窗口 / Activity 持有住 */
     private static final WeakHashMap<Dialog, View> CARDS = new WeakHashMap<Dialog, View>();
     /** 正在退场的 Dialog，防连点导致回调跑两遍 */
     private static final Set<Dialog> CLOSING =
             Collections.newSetFromMap(new WeakHashMap<Dialog, Boolean>());
+
+    /** 底部面板：Dialog → {卡片, 遮罩}，退场要用它做上滑而不是缩小 */
+    private static final WeakHashMap<Dialog, View[]> SHEETS = new WeakHashMap<Dialog, View[]>();
 
     private DialogKit() {
     }
@@ -308,6 +320,144 @@ public final class DialogKit {
         return present(act, f, false);
     }
 
+    /**
+     * 自下而上面板（bottom sheet）—— 选规格、切规格、囤冰箱这类"顺着当前这一行往下钻一层"的选择用它。
+     *
+     * 为什么不是中间弹框：中间框会把注意力从列表上抽走，还正好盖住"我刚点的是哪道菜"；
+     * 从屏幕下缘推上来的面板里，手指本来就在下半屏，动线更顺，也留出上半屏给用户确认上下文
+     * （Material / iOS 的通行做法）。
+     *
+     * 视觉：22dp 顶部圆角、卡片同色、顶部一根把手；标题左、✕ 右；内容超过屏高 68% 时自己滚。
+     * 动效：260ms Decelerate 上滑，遮罩同步淡入；退场反向滑出。
+     * 手势：点遮罩关、按住把手（含标题行）下滑超过 80dp 关、点 ✕ 关、返回键关。
+     * 颜色全部走 Ui 令牌，所以深浅色切换后自动跟主题。
+     *
+     * @param content 面板主体（自己用 Ui.vertical + Ui.pill 拼），已自带内边距的话请传 0 内边距容器
+     */
+    public static Dialog sheet(Activity act, String title, View content) {
+        if (act == null) {
+            return null;
+        }
+
+        final Dialog dlg = new Dialog(act);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        final FrameLayout root = new FrameLayout(act);
+
+        // 遮罩自己画：窗口 dim 是一步到位的，跟不上面板滑动，观感很硬
+        final View scrim = new View(act);
+        scrim.setBackgroundColor(0x77000000);
+        scrim.setAlpha(0f);
+        scrim.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                close(dlg);
+            }
+        });
+        root.addView(scrim, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        final LinearLayout card = Ui.vertical(act);
+        card.setOrientation(LinearLayout.VERTICAL);
+        // 只有上面两角是圆的：底边贴着屏幕底，不需要圆角
+        card.setBackground(Ui.roundTop(Ui.CARD, Ui.dp(act, 22f)));
+        card.setElevation(Ui.dp(act, 16f));
+        card.setClipChildren(false);
+        card.setClipToPadding(false);
+
+        // 把手：告诉用户"这块可以往下拽"
+        View grip = new View(act);
+        grip.setBackground(Ui.round(0xFFD8D2E4, Ui.dp(act, 2f)));
+        LinearLayout.LayoutParams gripLp = new LinearLayout.LayoutParams(
+                Ui.dpi(act, 38), Ui.dpi(act, 4));
+        gripLp.gravity = Gravity.CENTER_HORIZONTAL;
+        gripLp.topMargin = Ui.dpi(act, 9);
+        card.addView(grip, gripLp);
+
+        // 标题行：左标题 + 右 ✕（触控区 40dp，不靠字号撑）
+        LinearLayout head = Ui.horizontal(act);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(Ui.dpi(act, 20), Ui.dpi(act, 6), Ui.dpi(act, 12), 0);
+        TextView titleView = Ui.tv(act, isEmpty(title) ? "小窝" : title, 16f, Ui.TEXT, true);
+        titleView.setMaxLines(2);
+        titleView.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        head.addView(titleView, titleLp);
+        TextView x = Ui.tv(act, "✕", 15f, Ui.TEXT_MUTED, false);
+        x.setGravity(Gravity.CENTER);
+        x.setContentDescription("关闭");
+        x.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                close(dlg);
+            }
+        });
+        head.addView(x, new LinearLayout.LayoutParams(Ui.dpi(act, 40), Ui.dpi(act, 40)));
+        card.addView(head, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 内容区：超屏就滚，永远留出 32% 屏高让用户看见背景
+        int screenH = act.getResources().getDisplayMetrics().heightPixels;
+        MaxHeightScroll scroll = new MaxHeightScroll(act, Math.round(screenH * SHEET_MAX_RATIO));
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setPadding(Ui.dpi(act, 20), Ui.dpi(act, 6), Ui.dpi(act, 20), 0);
+        if (content != null) {
+            scroll.addView(content, new ScrollView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        card.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 底部留白：避开手势条 / 导航栏，否则最后一行会被系统条压住
+        View space = new View(act);
+        int spaceH = Ui.dpi(act, 14) + navBottom(act);
+        card.addView(space, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, spaceH));
+
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.gravity = Gravity.BOTTOM;
+        root.addView(card, cardLp);
+
+        // —— 下滑关闭：把手和标题行当拖拽区（面板主体要能正常滚动，不接管那里的触摸）——
+        sheetDrag(dlg, card, head);
+        sheetDrag(dlg, card, grip);
+
+        dlg.setContentView(root);
+        dlg.setCanceledOnTouchOutside(false); // 遮罩点击由 scrim 自己处理，窗口这一层别再插一脚
+        dlg.setCancelable(true);
+
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(0x00000000));
+            // 不加 FLAG_DIM_BEHIND：遮罩要跟面板同步淡入，不能一步到位
+            w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            w.setGravity(Gravity.BOTTOM);
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
+        }
+
+        SHEETS.put(dlg, new View[]{card, scrim});
+
+        if (act.isFinishing()) {
+            return dlg;
+        }
+        // 先放到屏幕外，show 之后按真实高度滑上来，避免"闪一下再弹"
+        card.setTranslationY(Ui.dp(act, 900f));
+        dlg.show();
+        card.post(new Runnable() {
+            public void run() {
+                float h = card.getHeight() > 0 ? card.getHeight() : Ui.dp(act, 460f);
+                card.setTranslationY(h);
+                card.animate().translationY(0f)
+                        .setDuration(SHEET_IN)
+                        .setInterpolator(new DecelerateInterpolator(1.5f))
+                        .start();
+                scrim.animate().alpha(1f).setDuration(SHEET_IN - 40).start();
+            }
+        });
+        return dlg;
+    }
+
     /** 带退场动画关闭（等价于 Dialog#dismiss，只是多一段淡出）；重复调用安全 */
     public static void dismiss(Dialog dlg) {
         close(dlg);
@@ -499,6 +649,29 @@ public final class DialogKit {
         if (!CLOSING.add(dlg)) {
             return false;
         }
+        final View[] sheet = SHEETS.remove(dlg);
+        if (sheet != null) {
+            final View scard = sheet[0];
+            final View sscrim = sheet[1];
+            float h = scard.getHeight() > 0 ? scard.getHeight()
+                    : Ui.dp(scard.getContext(), 460f);
+            scard.animate().translationY(h)
+                    .setDuration(DUR_OUT + 70)
+                    .setInterpolator(new AccelerateInterpolator(1.2f))
+                    .start();
+            sscrim.animate().alpha(0f)
+                    .setDuration(DUR_OUT + 70)
+                    .withEndAction(new Runnable() {
+                        public void run() {
+                            try {
+                                dlg.dismiss();
+                            } catch (Exception ignore) {
+                            }
+                        }
+                    }).start();
+            return true;
+        }
+
         final View card = CARDS.remove(dlg);
         if (card == null || !dlg.isShowing()) {
             try {
@@ -602,6 +775,59 @@ public final class DialogKit {
 
     private static boolean isEmpty(String s) {
         return s == null || s.length() == 0;
+    }
+
+    /** 给面板的一个区域装"向下拖就关"的手势；上滑/回弹都不拦截点击 */
+    private static void sheetDrag(final Dialog dlg, final View card, View handle) {
+        if (handle == null) {
+            return;
+        }
+        final Context c = handle.getContext();
+        handle.setOnTouchListener(new View.OnTouchListener() {
+            private float downY;
+
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downY = e.getRawY();
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        card.setTranslationY(Math.max(0f, e.getRawY() - downY));
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        float dy = card.getTranslationY();
+                        if (dy > Ui.dp(c, SHEET_DRAG_CLOSE_DP)) {
+                            close(dlg);
+                        } else {
+                            card.animate().translationY(0f).setDuration(150).start();
+                        }
+                        return true;
+                    }
+                    default:
+                        return false;
+                }
+            }
+        });
+    }
+
+    /** 手势条 / 三键导航的高度，面板底部要给它们留出空档 */
+    private static int navBottom(Activity act) {
+        try {
+            View dv = act.getWindow().getDecorView();
+            WindowInsets wi = dv.getRootWindowInsets();
+            if (wi == null) {
+                return 0;
+            }
+            if (Build.VERSION.SDK_INT >= 30) {
+                return wi.getInsets(WindowInsets.Type.navigationBars()).bottom;
+            }
+            if (Build.VERSION.SDK_INT >= 23) {
+                return wi.getSystemWindowInsetBottom();
+            }
+        } catch (Throwable ignore) {
+        }
+        return 0;
     }
 
     /** 内容高到一定程度才滚，矮的时候自然收起，不会留大片空白 */

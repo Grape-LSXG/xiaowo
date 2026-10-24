@@ -55,6 +55,18 @@ import java.util.Random;
  */
 public class OrderScreen extends LinearLayout {
 
+    /**
+     * 周期性任务的统一 Handler。
+     *
+     * 为什么要收成一个字段：深色模式切换改成"同窗口原地重建"之后，旧屏会被丢进垃圾堆，
+     * 但它内部那些 postDelayed 自循环还在跑 —— 每切一次主题就多一条永不停的循环，
+     * 心跳、菜谱广播都会翻倍。shutdown() 里 removeCallbacksAndMessages(null) 一次性掐掉。
+     */
+    private final android.os.Handler sched =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    /** shutdown 之后置 true，兜住"已经在执行的那一帧回调" */
+    private boolean dead = false;
+
     private static final int TAB_KITCHEN = 0;
     private static final int TAB_ORDERS = 1;
     private static final int TAB_FRIDGE = 2;
@@ -160,6 +172,7 @@ public class OrderScreen extends LinearLayout {
         tab = sp.getInt("cur_tab", TAB_KITCHEN);
         switchTab(tab);
         startServer();
+        schedulePresence();
         scheduleAutoPeerUpdate();
         scheduleSyncPush();
         scheduleMenuBroadcast();
@@ -188,11 +201,11 @@ public class OrderScreen extends LinearLayout {
      * 3 分钟一次、只有配置了中转才发，避免无谓流量。
      */
     private void scheduleMenuBroadcast() {
-        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final android.os.Handler h = sched;
         final Runnable[] self = new Runnable[1];
         self[0] = new Runnable() {
             public void run() {
-                if (act == null || act.isFinishing()) {
+                if (dead || act == null || act.isFinishing()) {
                     return;
                 }
                 if (com.couple.xiaowo.core.Relay.enabled(act)) {
@@ -211,6 +224,81 @@ public class OrderScreen extends LinearLayout {
         };
         // 启动后先等 20 秒（让首屏和服务先稳定），之后周期性广播
         h.postDelayed(self[0], 20000L);
+    }
+
+    // ---------------------------------------------------------------- 在线心跳
+
+    /** 心跳周期：25 秒。接单端 90 秒没收到就当它离线了 */
+    private static final long PRESENCE_MS = 25 * 1000L;
+
+    /**
+     * 周期性地告诉接单端「我这台点单端还在」。
+     *
+     * 为什么要有：接单端首页要显示「现在有几个点单端在线」。
+     * 光靠订单推不出来（不下单的时候难道就"没连接"？），
+     * 所以加一条独立的心跳，带设备编号 + 回信地址。
+     *
+     * 三条路都发（能通的先通）：直连 → 局域网发现 → 异地中转。
+     */
+    private void schedulePresence() {
+        final android.os.Handler h = sched;
+        final Runnable[] self = new Runnable[1];
+        self[0] = new Runnable() {
+            public void run() {
+                if (dead || act == null || act.isFinishing()) {
+                    return;
+                }
+                sendPresenceOnce();
+                h.postDelayed(self[0], PRESENCE_MS);
+            }
+        };
+        // 等 6 秒，让两个服务都起来、也避开首屏动画
+        h.postDelayed(self[0], 6000L);
+    }
+
+    private void sendPresenceOnce() {
+        final String id = com.couple.xiaowo.core.Client.id(act);
+        final String name = com.couple.xiaowo.core.Client.label(act);
+        final String host = Net.localIpv4();
+        final int port = server != null ? server.port() : 0;
+        final String body = Protocol.presence(id, name, host, port);
+        final String knownHost = peerHost;
+        final int knownPort = peerPort;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    if (knownHost != null && knownPort > 0) {
+                        if (Protocol.isOk(Net.post(knownHost, knownPort,
+                                Protocol.PATH_PRESENCE, body, 2000))) {
+                            return;
+                        }
+                    }
+                    // 同 Wi-Fi 但不记得地址：广播找一下
+                    for (Net.Peer p : Net.discover(1200)) {
+                        if (Protocol.isOk(Net.post(p.host, p.port,
+                                Protocol.PATH_PRESENCE, body, 1500))) {
+                            return;
+                        }
+                    }
+                } catch (Exception ignore) {
+                    // 心跳失败不打扰用户，下一轮再说
+                }
+                // 直连都不通 → 异地中转（接单端订阅着同一个房间）
+                if (Relay.enabled(act)) {
+                    try {
+                        Relay.publish(act, Protocol.ROLE_ORDER, body, 6000);
+                    } catch (Exception ignore) {
+                    }
+                }
+            }
+        }).start();
+    }
+
+    /** 中转连接状态变了 —— 顶部那行「⇄ 直连 / 🌐 中转」要重新说一遍 */
+    public void onRelayState() {
+        if (peerView != null) {
+            peerView.setText(peerText());
+        }
     }
 
     private void scheduleAutoPeerUpdate() {
@@ -389,6 +477,19 @@ public class OrderScreen extends LinearLayout {
         return p;
     }
 
+    /**
+     * 底部面板里的一行选项：整行横贯、至少 48dp 高。
+     *
+     * 为什么不用 top()：top() 是 WRAP_CONTENT 宽（给卡片里的小 pill 用的），
+     * 放进底部面板就变成一小截，手指得瞄着字点；整行可点才符合触控规范。
+     */
+    private LinearLayout.LayoutParams sheetRow(int dpTop) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.topMargin = dp(dpTop);
+        return p;
+    }
+
     private View buildSubHeader(String title, String sub) {
         LinearLayout h = Ui.vertical(act);
         h.setBackground(Ui.gradient(0xFFFFF0F7, 0xFFF5F0FE, dp(24)));
@@ -434,7 +535,9 @@ public class OrderScreen extends LinearLayout {
         o.id = "o" + System.currentTimeMillis();
         o.ts = System.currentTimeMillis();
         o.note = note;
-        o.fromName = Protocol.NAME_ORDER;
+        // 带上"是哪台点单端"：多台同时在线时接单端要靠它区分
+        o.fromId = com.couple.xiaowo.core.Client.id(act);
+        o.fromName = com.couple.xiaowo.core.Client.label(act);
         for (Map.Entry<String, Integer> e : cart.entrySet()) {
             String dishName = com.couple.xiaowo.core.CartKey.nameOf(e.getKey());
             String spec = com.couple.xiaowo.core.CartKey.specOf(e.getKey());
@@ -1233,20 +1336,19 @@ public class OrderScreen extends LinearLayout {
         LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         bLp.topMargin = dp(12);
-        TextView addDish = Ui.pill(act, "＋ 添加菜谱", 0xFFFFFFFF, Ui.TEXT, 11, 12, 7, false);
-        addDish.setBackground(Ui.round(0xFFFFFFFF, dp(999), Math.max(1, dp(0.8f)), 0xFFE7E1F2));
-        addDish.setOnClickListener(new OnClickListener() {
-            public void onClick(View v) {
-                toast("示例版：菜谱写在 core/Menu.java 里");
-            }
-        });
-        btns.addView(addDish);
-
+        /*
+         * 「＋ 添加菜谱」已删除。
+         *
+         * 它原来只弹一句"菜谱写在 core/Menu.java 里"，点了没有任何实际作用；
+         * 真正能加菜谱的入口是「管理 → ✏️ 编辑菜谱」（MenuEditor），
+         * 留着一个假按钮只会让人以为坏了。
+         */
         TextView search = Ui.pill(act, "🔍 搜索", 0xFFFFFFFF, Ui.TEXT, 11, 12, 7, false);
         search.setBackground(Ui.round(0xFFFFFFFF, dp(999), Math.max(1, dp(0.8f)), 0xFFE7E1F2));
         LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        sLp.leftMargin = dp(8);
+        // 删掉「添加菜谱」后，搜索变成第一个按钮，不再需要左边距
+        sLp.leftMargin = 0;
         btns.addView(search, sLp);
         search.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
@@ -1556,10 +1658,48 @@ public class OrderScreen extends LinearLayout {
         input.setHint("说点什么…");
         input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         input.setBackground(Ui.round(0xFFF7F4FB, dp(999)));
-        input.setPadding(dp(14), dp(9), dp(14), dp(9));
+        input.setPadding(dp(14), dp(10), dp(14), dp(10));
         input.setSingleLine(true);
-        sendRow.addView(input, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        input.setGravity(Gravity.CENTER_VERTICAL);
+        /*
+         * 输入框高度：收起 40dp、点开 132dp。
+         *
+         * 原来固定单行 ~36dp，一行长句只能看到末尾几个字，
+         * 想回头改前半句就得删了重打。现在点一下（获得焦点）就展开成
+         * 多行输入框，失焦再收回去 —— 聊天卡片本身不变高，只借上面的空间。
+         */
+        final int inShort = dp(40);
+        final int inLong = dp(132);
+        sendRow.addView(input, new LinearLayout.LayoutParams(0, inShort, 1f));
+        input.setOnFocusChangeListener(new OnFocusChangeListener() {
+            public void onFocusChange(View v, final boolean hasFocus) {
+                // 展开时允许多行换行，收起时回到单行（回车即发送的直觉）
+                if (hasFocus) {
+                    input.setSingleLine(false);
+                    input.setMaxLines(6);
+                    input.setGravity(Gravity.TOP | Gravity.START);
+                } else {
+                    input.setSingleLine(true);
+                    input.setGravity(Gravity.CENTER_VERTICAL);
+                }
+                final ViewGroup.LayoutParams lp = input.getLayoutParams();
+                android.animation.ValueAnimator va = android.animation.ValueAnimator
+                        .ofInt(lp.height < 0 ? inShort : lp.height, hasFocus ? inLong : inShort);
+                va.setDuration(180L);
+                va.addUpdateListener(new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                    public void onAnimationUpdate(android.animation.ValueAnimator a) {
+                        ViewGroup.LayoutParams p = input.getLayoutParams();
+                        p.height = (Integer) a.getAnimatedValue();
+                        input.setLayoutParams(p);
+                        // 展开时把这一行顶到可见区域，别被键盘挡住
+                        if (hasFocus && chatScroll != null) {
+                            chatScroll.smoothScrollBy(0, dp(40));
+                        }
+                    }
+                });
+                va.start();
+            }
+        });
         TextView send = Ui.pill(act, "发送", Ui.PRIMARY, 0xFFFFFFFF, 13, 16, 8, true);
         LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1709,7 +1849,9 @@ public class OrderScreen extends LinearLayout {
         /*
          * 「我」页最下面的爱心按钮。
          *
-         * 点一下爆一小簇，长按爆一大片 —— 纯粹是给猫猫自己点着玩的。
+         * 点一下爆一小簇；**按住不放就一直蹦、一直震**（松手才停）——
+         * 和长按菜品喷泡泡同一套节奏（见 attachLongPressBubble），
+         * 手指不松开，爱心就一簇接一簇地往外冒。
          */
         TextView love = Ui.pill(act, "❤️", Ui.ACCENT_SOFT, Ui.ACCENT, 22, 24, 12, true);
         love.setGravity(Gravity.CENTER);
@@ -1719,14 +1861,8 @@ public class OrderScreen extends LinearLayout {
                 vibrate();
             }
         });
-        love.setOnLongClickListener(new OnLongClickListener() {
-            public boolean onLongClick(View v) {
-                host.burst(80);
-                vibrate();
-                return true;
-            }
-        });
-        love.setContentDescription("撒一把爱心，长按撒更多");
+        attachLongPressHeart(love);
+        love.setContentDescription("撒一把爱心，长按会一直撒");
         LinearLayout.LayoutParams loveLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         loveLp.topMargin = dp(16);
@@ -2191,8 +2327,9 @@ public class OrderScreen extends LinearLayout {
                 continue;
             }
             String label = (sp.length() == 0 ? "不选规格" : sp) + "　×" + q;
-            TextView row = Ui.pill(act, label, 0xFFF7F5FA, Ui.TEXT, 12.5f, 14, 10, false);
+            TextView row = Ui.pill(act, label, 0xFFF7F5FA, Ui.TEXT, 13f, 16, 12, false);
             row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setMinHeight(dp(46));
             row.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     addToCartSpec(it.name, sp, -1);
@@ -2202,9 +2339,9 @@ public class OrderScreen extends LinearLayout {
                     }
                 }
             });
-            box.addView(row, top(6));
+            box.addView(row, sheetRow(8));
         }
-        dlgRef[0] = DialogKit.custom(act, "减掉一份", box, "取消", null);
+        dlgRef[0] = DialogKit.sheet(act, "减掉一份", box);
     }
 
     /**
@@ -2222,9 +2359,9 @@ public class OrderScreen extends LinearLayout {
         // 每个规格一行，点了直接加进购物车并关掉弹窗
         final Dialog[] dlgRef = new Dialog[1];
         for (final String sp : it.specs) {
-            TextView row = Ui.pill(act, sp, 0xFFF7F5FA, Ui.TEXT, 12.5f, 14, 10, false);
+            TextView row = Ui.pill(act, sp, 0xFFF7F5FA, Ui.TEXT, 13f, 16, 12, false);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams rLp = top(6);
+            row.setMinHeight(dp(46));
             row.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     addToCartSpec(it.name, sp, 1);
@@ -2235,9 +2372,9 @@ public class OrderScreen extends LinearLayout {
                     toastOk("已加「" + it.name + "·" + sp + "」");
                 }
             });
-            box.addView(row, rLp);
+            box.addView(row, sheetRow(8));
         }
-        dlgRef[0] = DialogKit.custom(act, "选规格", box, "取消", null);
+        dlgRef[0] = DialogKit.sheet(act, "选规格", box);
     }
     /**
      * 长按入冰箱时，让用户选一个规格囤起来。
@@ -2255,8 +2392,9 @@ public class OrderScreen extends LinearLayout {
             final String key = com.couple.xiaowo.core.CartKey.of(it.name, sp);
             boolean already = fridge.contains(key);
             TextView row = Ui.pill(act, sp + (already ? "（已在冰箱）" : ""),
-                    0xFFF7F5FA, Ui.TEXT, 12.5f, 14, 10, false);
+                    0xFFF7F5FA, Ui.TEXT, 13f, 16, 12, false);
             row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setMinHeight(dp(46));
             row.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
                     if (fridge.contains(key)) {
@@ -2272,9 +2410,9 @@ public class OrderScreen extends LinearLayout {
                     }
                 }
             });
-            box.addView(row, top(6));
+            box.addView(row, sheetRow(8));
         }
-        dlgRef[0] = DialogKit.custom(act, "存进冰箱", box, "取消", null);
+        dlgRef[0] = DialogKit.sheet(act, "存进冰箱「" + it.name + "」", box);
     }
 
     private void reorder(History.Entry e) {
@@ -2945,6 +3083,57 @@ public class OrderScreen extends LinearLayout {
         });
     }
 
+    // ================================================================ 长按撒爱心
+
+    /**
+     * 按住爱心：一直蹦、一直震，松手才停。
+     *
+     * 之前长按只是一次性 burst(80) + 一下震动，按住屏幕不会持续有反馈，
+     * 手指停在上面像卡住了。现在沿用 attachLongPressBubble 的节奏：
+     * 按下先给一簇大的，然后每 180ms 补一小簇 + 一次轻震，
+     * ACTION_UP / ACTION_CANCEL 时把定时器摘掉。
+     *
+     * 用 {@code v.isPressed()} 兜底：即使没收到 UP（比如手指滑出控件），
+     * 循环也会在下一次 tick 自然停下，不会漏震。
+     */
+    private void attachLongPressHeart(final TextView btn) {
+        btn.setOnLongClickListener(new OnLongClickListener() {
+            public boolean onLongClick(final View v) {
+                final android.os.Handler h =
+                        new android.os.Handler(android.os.Looper.getMainLooper());
+                final Runnable[] task = new Runnable[1];
+                // 第一下给足"按住了"的反馈
+                host.burst(28);
+                Haptics.pop(act);
+                vibrate();
+                task[0] = new Runnable() {
+                    public void run() {
+                        if (!v.isPressed()) {
+                            return;
+                        }
+                        host.burst(7);
+                        Haptics.tick(act);
+                        h.postDelayed(task[0], 180);
+                    }
+                };
+                h.postDelayed(task[0], 180);
+                v.setOnTouchListener(new View.OnTouchListener() {
+                    public boolean onTouch(View view, android.view.MotionEvent e) {
+                        int a = e.getActionMasked();
+                        if (a == android.view.MotionEvent.ACTION_UP
+                                || a == android.view.MotionEvent.ACTION_CANCEL) {
+                            h.removeCallbacks(task[0]);
+                            Haptics.pop(act);
+                            view.setOnTouchListener(null);
+                        }
+                        return false;
+                    }
+                });
+                return true;
+            }
+        });
+    }
+
     // ================================================================ 兼容旧方法名
 
     private void sendChatToPeer(Social.Msg m) {
@@ -3147,6 +3336,8 @@ public class OrderScreen extends LinearLayout {
     }
 
     public void shutdown() {
+        dead = true;
+        sched.removeCallbacksAndMessages(null);
         GitHubCard.stopPeriodic();
         if (server != null) {
             server.stop();

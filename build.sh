@@ -118,6 +118,21 @@ PYEOF
     cp -r "$ROOT/res/mipmap-"* "$resDir/" 2>/dev/null || true
   fi
 
+  # ---- 图标：两端各一套 ----
+  # res/ 里是接单端那只（从墙后探头），res-order/ 里是点单端那只（戴月桂冠）。
+  # aapt 只接受一个 -S，所以点单端把两份合到一个临时目录，同名的以 res-order 为准。
+  if [ "$role" = "order" ] && [ -d "$ROOT/res-order" ]; then
+    resDir="$wd/res-role"
+    rm -rf "$resDir"
+    mkdir -p "$resDir"
+    cp -r "$ROOT/res/"* "$resDir/"
+    for d in "$ROOT"/res-order/mipmap-*; do
+      [ -d "$d" ] || continue
+      mkdir -p "$resDir/$(basename "$d")"
+      cp -f "$d"/* "$resDir/$(basename "$d")/"
+    done
+  fi
+
   aapt package -f \
     -M "$wd/AndroidManifest.xml" \
     -S "$resDir" \

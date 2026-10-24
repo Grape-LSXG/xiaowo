@@ -1,5 +1,9 @@
 package com.couple.xiaowo.ui;
 
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.widget.ImageView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import com.couple.xiaowo.core.Relay;
 import com.couple.xiaowo.core.Mqtt;
@@ -29,6 +33,11 @@ public class MainActivity extends Activity implements HeartHost {
     private BubbleBurstView bubbleView;
     private OrderScreen orderScreen;
     private RecvScreen recvScreen;
+    /** 当前挂在 root 里的那一屏（切主题时要整屏换掉） */
+    private View screenView;
+    private FrameLayout root;
+    /** 防止一次切换里被传感器的第二节回调重入 */
+    private boolean themeSwapping = false;
     private Theme.Ambient ambient;
 
     /**
@@ -40,61 +49,99 @@ public class MainActivity extends Activity implements HeartHost {
      * 现在只有一份，任何页面要显示状态都从这里读。
      */
     private Mqtt.Sub relaySub;
-    private final java.util.List<TextView> relayStatusViews = new java.util.ArrayList<TextView>();
+    /**
+     * 所有显示中转状态的 TextView（弱引用 + 前缀）。
+     *
+     * 为什么用 WeakHashMap 而不是 ArrayList：
+     * 这些 View 属于各自页面，页面重建（切 Tab、主题刷新）后旧 View 就被丢了。
+     * 用强引用的 List 会一直攒着已经不在界面上的 TextView；
+     * 用弱引用表，谁被回收谁自己消失，任何页面重建后重新 bind 一次即可。
+     */
+    private final java.util.Map<TextView, String> relayStatusViews =
+            new java.util.WeakHashMap<TextView, String>();
     private String relayLastNote = "";
 
-    /** 让某个 TextView 跟随中转状态刷新 */
+    /** 让某个 TextView 跟随中转状态刷新（默认前缀「🌐 异地中转：」） */
     public void bindRelayStatus(TextView tv) {
+        bindRelayStatus(tv, "🌐 异地中转：");
+    }
+
+    /** 同上，前缀由调用方决定（如「中转状态：」） */
+    public void bindRelayStatus(TextView tv, String prefix) {
         if (tv == null) {
             return;
         }
-        relayStatusViews.add(tv);
-        tv.setText(relayStatusText());
-        tv.setTextColor(relaySub != null && relaySub.isOnline()
-                ? Theme.adapt(0xFF16A34A) : Theme.adapt(0xFF958DA3));
+        relayStatusViews.put(tv, prefix == null ? "" : prefix);
+        boolean online = relayOnline();
+        tv.setText((prefix == null ? "" : prefix) + relayStatusText());
+        tv.setTextColor(Theme.adapt(online ? 0xFF16A34A : 0xFF958DA3));
     }
 
+    /** 中转是否真的连上了 broker —— 各页面显示「在线/重连中」都读这里 */
+    public boolean relayOnline() {
+        return relaySub != null && relaySub.isOnline();
+    }
+
+    /**
+     * 不带前缀的状态短语。
+     *
+     * 这里**只看真实的订阅状态**，不看"存没存过房间码"：
+     * 原来首页卡片是建页面时写死的一句「未配对」，之后再没人改它，
+     * 所以配对了也永远显示未配对（用户报的就是这个）。
+     */
     private String relayStatusText() {
         String room = Relay.room(this);
         if (room == null || !Relay.enabled(this)) {
-            return "中转状态：未配对";
+            return "未配对";
         }
         if (relaySub == null) {
-            return "中转状态：准备连接…（房间 " + room + "）";
+            return "准备连接…（房间 " + room + "）";
         }
         if (relaySub.isOnline()) {
-            return "中转状态：在线"
-                    + (relayLastNote.length() > 0 ? "（" + relayLastNote + "）" : "")
-                    + "　房间 " + room;
+            return "在线 · 房间 " + room;
         }
-        return "中转状态：" + (relayLastNote.length() > 0 ? relayLastNote : "重连中…")
-                + "　房间 " + room;
+        return (relayLastNote.length() > 0 ? relayLastNote : "重连中…") + "　房间 " + room;
     }
 
     private void notifyRelayViews() {
         final String text = relayStatusText();
-        final boolean online = relaySub != null && relaySub.isOnline();
+        final boolean online = relayOnline();
         runOnUiThread(new Runnable() {
             public void run() {
-                for (TextView tv : relayStatusViews) {
+                for (java.util.Map.Entry<TextView, String> e : relayStatusViews.entrySet()) {
+                    TextView tv = e.getKey();
                     if (tv == null) {
                         continue;
                     }
-                    tv.setText(text);
+                    String prefix = e.getValue();
+                    tv.setText((prefix == null ? "" : prefix) + text);
                     tv.setTextColor(Theme.adapt(online ? 0xFF16A34A : 0xFF958DA3));
+                }
+                // 除了写死的状态行，页面自己算的文案（点单端顶部的「⇄ 直连」）也要跟着变
+                if (orderScreen != null) {
+                    orderScreen.onRelayState();
+                }
+                if (recvScreen != null) {
+                    recvScreen.onRelayState();
                 }
             }
         });
     }
 
-    /** 重建中转订阅（配对/解绑后调用） */
+    /**
+     * 重建中转订阅（配对/解绑后调用）。
+     *
+     * 注意**不能**再清空 relayStatusViews：清掉之后这些 View 就再也不会
+     * 被刷新了 —— 那正是「首页一直显示未配对」的第二个成因。
+     */
     public void restartRelay() {
         if (relaySub != null) {
             relaySub.close();
             relaySub = null;
         }
-        relayStatusViews.clear();
+        relayLastNote = "连接中…";
         startRelay();
+        notifyRelayViews();
     }
 
     /**
@@ -166,19 +213,10 @@ public class MainActivity extends Activity implements HeartHost {
         Ui.applyTheme();
         setupWindow();
 
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         root.setBackgroundColor(Theme.adapt(Ui.BG));
-
-        View screen;
-        if (BuildInfo.IS_ORDER) {
-            orderScreen = new OrderScreen(this, this);
-            screen = orderScreen;
-        } else {
-            recvScreen = new RecvScreen(this, this);
-            screen = recvScreen;
-        }
-        root.addView(screen, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        buildScreens();
+        View screen = screenView;
 
         burstView = new HeartBurstView(this);
         root.addView(burstView, new FrameLayout.LayoutParams(
@@ -212,7 +250,7 @@ public class MainActivity extends Activity implements HeartHost {
          */
         Theme.syncAutoFromSensor(this, new Runnable() {
             public void run() {
-                recreate();
+                applyThemeInPlace();
             }
         });
         startRelay();
@@ -247,7 +285,7 @@ public class MainActivity extends Activity implements HeartHost {
                  */
                 ThemeSwitchOverlay.play(MainActivity.this, nowDark, new Runnable() {
                     public void run() {
-                        recreate();
+                        applyThemeInPlace();
                     }
                 });
             }
@@ -259,7 +297,7 @@ public class MainActivity extends Activity implements HeartHost {
     public void onThemePicked(final int mode) {
         Theme.setMode(this, mode);
         if (mode != Theme.MODE_AUTO) {
-            recreate();
+            applyThemeInPlace();
             return;
         }
         /*
@@ -275,11 +313,149 @@ public class MainActivity extends Activity implements HeartHost {
                 runOnUiThread(new Runnable() {
                     public void run() {
                         Theme.applyAuto(MainActivity.this, !bright);
-                        recreate();
+                        applyThemeInPlace();
                     }
                 });
             }
         }).start();
+    }
+
+    /** 按角色建当前这一屏（冷启动、切主题时都走这里） */
+    private void buildScreens() {
+        if (BuildInfo.IS_ORDER) {
+            orderScreen = new OrderScreen(this, this);
+            screenView = orderScreen;
+        } else {
+            recvScreen = new RecvScreen(this, this);
+            screenView = recvScreen;
+        }
+        root.addView(screenView, 0, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+
+    /**
+     * 原地换主题 —— **不再 recreate()**。
+     *
+     * 为什么不能只改根布局背景：整屏的每个背景/字色都是建视图那一刻
+     * 由 Ui 工厂算好、直接写进 View 里的（204 处字面量），
+     * 运行时没有"主题变量"可读，所以只能重建视图。
+     *
+     * 但重建视图 ≠ 必须重建 Activity：
+     *   · recreate() 会把窗口、Activity、服务全重启一次，屏幕会闪一下、
+     *     Tab 之外的状态全丢，用户看到的就是"刷新了"；
+     *   · 这里只在同一个窗口里把内容那一屏换掉：先把旧画面截图盖在最上层，
+     *     换完再淡出 —— 颜色是"渐变过去"的，滚动位置也按原位恢复。
+     */
+    public void applyThemeInPlace() {
+        if (themeSwapping || root == null) {
+            recreate();
+            return;
+        }
+        themeSwapping = true;
+        try {
+            Ui.applyTheme();
+            setupWindow();
+            root.setBackgroundColor(Theme.adapt(Ui.BG));
+
+            // 1) 记下当前滚动位置（按 View 树顺序，恢复时一一对应）
+            final java.util.List<Integer> scrolls = new java.util.ArrayList<Integer>();
+            collectScroll(root, scrolls);
+            // 2) 旧画面截图：切换过程中盖在上面淡出，避免任何"白闪"
+            Bitmap veil = snapshot(root);
+
+            // 3) 拆旧建新（服务端口短暂释放，随即重新绑定）
+            if (orderScreen != null) {
+                orderScreen.shutdown();
+                orderScreen = null;
+            }
+            if (recvScreen != null) {
+                recvScreen.shutdown();
+                recvScreen = null;
+            }
+            if (screenView != null) {
+                root.removeView(screenView);
+                screenView = null;
+            }
+            buildScreens();
+            restoreScroll(root, scrolls);
+
+            // 4) 淡出旧画面
+            if (veil != null) {
+                final ImageView layer = new ImageView(this);
+                layer.setImageBitmap(veil);
+                layer.setScaleType(ImageView.ScaleType.FIT_XY);
+                root.addView(layer, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+                layer.animate().alpha(0f).setDuration(240).withEndAction(new Runnable() {
+                    public void run() {
+                        root.removeView(layer);
+                        veil.recycle();
+                    }
+                });
+            }
+        } finally {
+            themeSwapping = false;
+        }
+    }
+
+    /** 把树里所有 ScrollView 的滚动位置按顺序记下来 */
+    private void collectScroll(View v, java.util.List<Integer> out) {
+        if (v == null) {
+            return;
+        }
+        if (v instanceof ScrollView) {
+            out.add(Integer.valueOf(((ScrollView) v).getScrollY()));
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                collectScroll(g.getChildAt(i), out);
+            }
+        }
+    }
+
+    /** 按同样顺序把滚动位置还回去（数量对不上就按少的来） */
+    private void restoreScroll(View v, java.util.List<Integer> ys) {
+        if (v == null || ys.isEmpty()) {
+            return;
+        }
+        final java.util.List<ScrollView> found = new java.util.ArrayList<ScrollView>();
+        gatherScrolls(v, found);
+        for (int i = 0; i < found.size() && i < ys.size(); i++) {
+            found.get(i).scrollTo(0, ys.get(i).intValue());
+        }
+    }
+
+    private void gatherScrolls(View v, java.util.List<ScrollView> out) {
+        if (v == null) {
+            return;
+        }
+        if (v instanceof ScrollView) {
+            out.add((ScrollView) v);
+        }
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                gatherScrolls(g.getChildAt(i), out);
+            }
+        }
+    }
+
+    /** 把当前界面画到一张位图上（拿不到尺寸就返回 null，宁可不淡出也不崩） */
+    private Bitmap snapshot(View v) {
+        try {
+            int w = v.getWidth();
+            int h = v.getHeight();
+            if (w <= 0 || h <= 0) {
+                return null;
+            }
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            v.draw(new Canvas(bmp));
+            return bmp;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private void setupWindow() {

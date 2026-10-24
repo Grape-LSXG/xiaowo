@@ -1,20 +1,14 @@
 {
-  "versionCode": 44,
-  "versionName": "4.5",
-  "orderApk": "xiaowo-order.apk",
-  "recvApk": "xiaowo-recv.apk",
-  "notes": "聊天记录改成按「谁发的」判定，修掉自己发的消息刷新后变对方的问题；聊天框可以滑动浏览历史；两端都能编辑菜谱（改名/改价/加规格/删除）并互相同步，异地也能经中转同步；聊天记录可导出成文件备份，也能从备份导入；图标换成斜眼表情。",
   "order": {
-    "versionCode": 44,
-    "versionName": "4.5",
-    "url": "",
-    "size": 783715
+    "versionCode": 45,
+    "versionName": "4.6",
+    "url": "https://Grape-LSXG.github.io/xiaowo/xiaowo/xiaowo-order.apk",
+    "notes": "首页异地中转不再显示「未配对」；两端图标各换成一张猫（点单端戴月桂冠、接单端墙后探头）；选规格改成从底部弹出的面板；去掉主页没用的「添加菜谱」；点单端聊天框点开自动变高；切深色模式不再整屏重启；点单端底部爱心长按会一直撒爱心+震动；支持多台点单端同时在线，接单端首页显示有几台在连。"
   },
   "recv": {
-    "versionCode": 44,
-    "versionName": "4.5",
-    "url": "",
-    "size": 1566135
-  },
-  "size": 783715
+    "versionCode": 45,
+    "versionName": "4.6",
+    "url": "https://Grape-LSXG.github.io/xiaowo/xiaowo/xiaowo-recv.apk",
+    "notes": "首页异地中转不再显示「未配对」；两端图标各换成一张猫（点单端戴月桂冠、接单端墙后探头）；选规格改成从底部弹出的面板；去掉主页没用的「添加菜谱」；点单端聊天框点开自动变高；切深色模式不再整屏重启；点单端底部爱心长按会一直撒爱心+震动；支持多台点单端同时在线，接单端首页显示有几台在连。"
+  }
 }
