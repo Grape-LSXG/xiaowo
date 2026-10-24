@@ -737,6 +737,9 @@ public class OrderScreen extends LinearLayout {
         try {
             if (Protocol.TYPE_CHAT.equals(type)) {
                 onChatIncoming(Social.Msg.fromJson(payload));
+            } else if (Protocol.TYPE_MENU.equals(type)) {
+                // 接单端改了菜谱，经中转推过来（异地时的通路）
+                applyMenuFromPeer(payload, "菜谱已从张老师那边更新");
             } else if (Protocol.TYPE_NOTICE.equals(type)) {
                 Social.Notice n = Social.Notice.fromJson(payload);
                 if (noticeView != null) {
@@ -1429,7 +1432,33 @@ public class OrderScreen extends LinearLayout {
             cLp.bottomMargin = dp(10);
             content.addView(card, cLp);
         }
-        content.addView(Ui.tv(act, "想改菜名/价格：编辑 core/Menu.java 后重新编译", 10.5f, Ui.SUB, false), top(4));
+        // 两端都能改菜谱：这里开共用的 MenuEditor，改完存盘并推给对方
+        TextView editMenu = Ui.pill(act, "✏️ 编辑菜谱（改名/改价/加规格/删除）",
+                Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 12, 18, 9, true);
+        editMenu.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                MenuEditor.open(act, new MenuEditor.OnChanged() {
+                    public void onChanged() {
+                        saveMenuToDisk();
+                        byName.clear();
+                        for (Menu.Category c : Menu.CATEGORIES) {
+                            for (Menu.Item it : c.items) {
+                                byName.put(it.name, it);
+                            }
+                        }
+                        pages[TAB_KITCHEN] = null;
+                        pages[TAB_MANAGE] = null;
+                        switchTab(TAB_MANAGE);
+                        buildSidebar();
+                        rebuildList();
+                        pushMenuToPeer(null);
+                    }
+                });
+            }
+        });
+        content.addView(editMenu, top(6));
+        content.addView(Ui.tv(act, "改完会自动同步给张老师；张老师那边改了也会同步回来",
+                10.5f, Ui.SUB, false), top(4));
         scroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
@@ -1492,6 +1521,29 @@ public class OrderScreen extends LinearLayout {
         chatCard.addView(Ui.dividerTop(act, 10));
         chatScroll = new ScrollView(act);
         chatScroll.setVerticalScrollBarEnabled(false);
+        /*
+         * 修复「聊天框划不动」。
+         *
+         * 聊天区在「我」页里，而「我」页外面本身就是一个 ScrollView ——
+         * ScrollView 套 ScrollView 时，外层会把垂直手势全部吃掉，
+         * 内层永远收不到滑动，看起来就是"聊天记录翻不了页"。
+         *
+         * 做法：手指落在聊天区上时，通知所有父容器不要拦截触摸事件，
+         * 抬手/取消时再恢复，让外层继续正常工作。
+         */
+        chatScroll.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, android.view.MotionEvent e) {
+                int action = e.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN
+                        || action == android.view.MotionEvent.ACTION_MOVE) {
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                } else if (action == android.view.MotionEvent.ACTION_UP
+                        || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                return false;   // 不消费事件，交给 ScrollView 自己处理
+            }
+        });
         chatBox = Ui.vertical(act);
         chatBox.setPadding(0, dp(10), 0, dp(6));
         chatScroll.addView(chatBox, new ScrollView.LayoutParams(
@@ -1524,6 +1576,64 @@ public class OrderScreen extends LinearLayout {
         });
         sendRow.addView(send, sLp);
         chatCard.addView(sendRow, top(8));
+
+        // ---------- 聊天记录备份 ----------
+        LinearLayout backupRow = Ui.horizontal(act);
+        backupRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView backupHint = Ui.tv(act, "聊天记录", 10.5f, Ui.TEXT_MUTED, false);
+        backupRow.addView(backupHint);
+        backupRow.addView(new View(act), new LinearLayout.LayoutParams(0, 1, 1f));
+
+        TextView exportBtn = Ui.pill(act, "⬇ 导出备份", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                11, 12, 6, true);
+        exportBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                com.couple.xiaowo.core.ChatIO.export(act, chatLog, false,
+                        new com.couple.xiaowo.core.ChatIO.OnExported() {
+                            public void onExported(String fileName, int count) {
+                                toastOk("已导出 " + count + " 条到「下载/小窝/" + fileName + "」");
+                            }
+                        },
+                        new com.couple.xiaowo.core.ChatIO.OnError() {
+                            public void onError(String msg) {
+                                toastWarn(msg);
+                            }
+                        });
+            }
+        });
+        backupRow.addView(exportBtn);
+
+        TextView importBtn = Ui.pill(act, "⬆ 导入", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                11, 12, 6, true);
+        LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ibLp.leftMargin = dp(6);
+        importBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                com.couple.xiaowo.core.ChatIO.pickImport(act, true,
+                        new com.couple.xiaowo.core.ChatIO.OnImported() {
+                            public void onImported(java.util.List<com.couple.xiaowo.core.Social.Msg> msgs,
+                                                   String fileName) {
+                                int added = com.couple.xiaowo.core.ChatIO.mergeInto(chatLog, msgs);
+                                saveChat();
+                                rebuildChat();
+                                if (added > 0) {
+                                    toastOk("导入了 " + added + " 条聊天记录");
+                                } else {
+                                    toast("这个备份里的记录都已经有了");
+                                }
+                            }
+                        },
+                        new com.couple.xiaowo.core.ChatIO.OnError() {
+                            public void onError(String msg) {
+                                toastWarn(msg);
+                            }
+                        });
+            }
+        });
+        backupRow.addView(importBtn, ibLp);
+        chatCard.addView(backupRow, top(8));
+
         content.addView(chatCard);
         rebuildChat();
 
@@ -1832,7 +1942,8 @@ public class OrderScreen extends LinearLayout {
          */
         try {
             chatLog.clear();
-            chatLog.addAll(Social.parseMsgs(sp.getString("chat", "[]"), false));
+            // 点单端是「猫猫」那一端：who=="cat" 就是我发的
+            chatLog.addAll(Social.parseMsgs(sp.getString("chat", "[]"), true));
         } catch (Exception ignore) {
         }
         try {
@@ -2218,6 +2329,8 @@ public class OrderScreen extends LinearLayout {
         for (Social.Msg m : p.chat) {
             String key = m.who + "|" + m.ts + "|" + m.text;
             if (!chatKeys.contains(key)) {
+                // 同步过来的消息：mine 要按本机角色重算，不能沿用对方的值
+                m.mine = Social.mineForWho(m.who, true);
                 chatLog.add(m);
                 chatKeys.add(key);
                 changed = true;
@@ -2697,6 +2810,36 @@ public class OrderScreen extends LinearLayout {
         return sb.toString();
     }
 
+    /**
+     * 应用对方推来的菜谱（直连 POST /menu 和中转 TYPE_MENU 共用）。
+     *
+     * 两条通路都会走到这里：同 Wi-Fi 时走 HTTP，异地时走中转。
+     */
+    private void applyMenuFromPeer(final String body, final String tip) {
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                Menu.applyJson(body, true);
+                saveMenuToDisk();
+                byName.clear();
+                for (Menu.Category c : Menu.CATEGORIES) {
+                    for (Menu.Item it : c.items) {
+                        byName.put(it.name, it);
+                    }
+                }
+                pages[TAB_KITCHEN] = null;
+                pages[TAB_MANAGE] = null;
+                if (tab == TAB_KITCHEN) {
+                    switchTab(TAB_KITCHEN);
+                    buildSidebar();
+                    rebuildList();
+                } else if (tab == TAB_MANAGE) {
+                    switchTab(TAB_MANAGE);
+                }
+                Toast2.ok(act, tip);
+            }
+        });
+    }
+
     private void pushMenuToPeer(final TextView stamp) {
         final String body = Menu.toJson();
         Toast2.show(act, Toast2.LOADING, "正在把菜谱推给张老师…");
@@ -2922,25 +3065,7 @@ public class OrderScreen extends LinearLayout {
                 }
                 if (Protocol.PATH_MENU.equals(path)) {
                     // 接单端把（可能被它调整过的）菜谱推回来
-                    act.runOnUiThread(new Runnable() {
-                        public void run() {
-                            Menu.applyJson(body, true);
-                            saveMenuToDisk();
-                            byName.clear();
-                            for (Menu.Category c : Menu.CATEGORIES) {
-                                for (Menu.Item it : c.items) {
-                                    byName.put(it.name, it);
-                                }
-                            }
-                            pages[TAB_KITCHEN] = null;
-                            if (tab == TAB_KITCHEN) {
-                                switchTab(TAB_KITCHEN);
-                                buildSidebar();
-                                rebuildList();
-                            }
-                            Toast2.ok(act, "菜谱已从张老师那边更新");
-                        }
-                    });
+                    applyMenuFromPeer(body, "菜谱已从张老师那边更新");
                     return Protocol.ack(true, Protocol.ROLE_ORDER, "菜单已更新");
                 }
                 if (Protocol.PATH_PING.equals(path)) {

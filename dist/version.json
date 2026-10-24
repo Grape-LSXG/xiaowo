@@ -1,20 +1,20 @@
 {
-  "versionCode": 43,
-  "versionName": "4.4",
+  "versionCode": 44,
+  "versionName": "4.5",
   "orderApk": "xiaowo-order.apk",
   "recvApk": "xiaowo-recv.apk",
-  "notes": "修复消息发不出去（聊天/公告缺 type 字段，经中转会被丢弃）+ 给两端聊天加中转兜底；修复提醒程度等文字颜色在深色模式下的问题；每次切回前台检查权限与更新；UI 优化（无障碍标签、触摸目标、字号、底部导航）",
+  "notes": "聊天记录改成按「谁发的」判定，修掉自己发的消息刷新后变对方的问题；聊天框可以滑动浏览历史；两端都能编辑菜谱（改名/改价/加规格/删除）并互相同步，异地也能经中转同步；聊天记录可导出成文件备份，也能从备份导入；图标换成斜眼表情。",
   "order": {
-    "versionCode": 43,
-    "versionName": "4.4",
+    "versionCode": 44,
+    "versionName": "4.5",
     "url": "",
-    "size": 771427
+    "size": 779619
   },
   "recv": {
-    "versionCode": 43,
-    "versionName": "4.4",
+    "versionCode": 44,
+    "versionName": "4.5",
     "url": "",
-    "size": 1541559
+    "size": 1557943
   },
-  "size": 771427
+  "size": 779619
 }

@@ -406,6 +406,20 @@ public class MainActivity extends Activity implements HeartHost {
                 "在后台运行中 · 点我回到小窝");
     }
 
+    /**
+     * 系统文件选择器返回（聊天记录导入用）。
+     *
+     * 聊天记录导入要先选文件，而选文件必须走 startActivityForResult，
+     * 所以把结果转发给 ChatIO 处理，避免在这里掺业务逻辑。
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        if (com.couple.xiaowo.core.ChatIO.onActivityResult(requestCode, resultCode, data)) {
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
     @Override
     public void onBackPressed() {
         // 规范：返回行为要可预期。在非「厨房」页时，先回到厨房，而不是直接退出。

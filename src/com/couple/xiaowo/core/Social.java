@@ -65,6 +65,7 @@ public final class Social {
                     "type", Json.quote(Protocol.TYPE_CHAT),
                     "who", Json.quote(who),
                     "text", Json.quote(text),
+                    "mine", mine ? "true" : "false",
                     "ts", String.valueOf(ts)));
         }
 
@@ -91,7 +92,23 @@ public final class Social {
         return Json.array(parts);
     }
 
-    public static List<Msg> parseMsgs(String json, boolean mineWhenCat) {
+    /**
+     * 解析聊天记录。
+     *
+     * @param catIsMe 本机是不是「猫猫」那一端（点单端 true / 接单端 false）
+     *
+     * ── 这里为什么必须按 who 推导 mine ──
+     *
+     * 以前这个参数收下了却**没用**，mine 一律取默认 false。结果：
+     * 自己发的消息被存进 SharedPreferences 后，重开 App 全部变回"对方发的"，
+     * 气泡左右位置也一起错乱 —— 这就是"自己发的消息刷新后变成对方的"根因。
+     *
+     * 现在统一按 who 推导，不信任序列化里的 mine：
+     *   who == "cat" 且本机是点单端  → 是我
+     *   who == "teacher" 且本机是接单端 → 是我
+     * 这样跨设备同步过来的记录也能算对（对方存的 mine 对我们没意义）。
+     */
+    public static List<Msg> parseMsgs(String json, boolean catIsMe) {
         List<Msg> out = new ArrayList<Msg>();
         if (json == null || json.length() == 0) {
             return out;
@@ -99,18 +116,39 @@ public final class Social {
         try {
             Object o = Json.parse(json);
             if (o instanceof List) {
-                for (Object item : (List<?>) o) {
-                    Map<String, Object> m = Json.asObject(item);
-                    Msg g = new Msg();
-                    g.who = Json.str(m, "who", "cat");
-                    g.text = Json.str(m, "text", "");
-                    g.ts = Json.num(m, "ts", 0);
-                    out.add(g);
-                }
+                out = parseMsgsList((List<?>) o, catIsMe);
             }
         } catch (Exception ignore) {
         }
         return out;
+    }
+
+    /** 把已经解析成 List 的消息对象转成 Msg（导入备份时用） */
+    public static List<Msg> parseMsgsList(List<?> items, boolean catIsMe) {
+        List<Msg> out = new ArrayList<Msg>();
+        if (items == null) {
+            return out;
+        }
+        for (Object item : items) {
+            Map<String, Object> m = Json.asObject(item);
+            Msg g = new Msg();
+            g.who = Json.str(m, "who", "cat");
+            g.text = Json.str(m, "text", "");
+            g.ts = Json.num(m, "ts", 0);
+            g.mine = mineForWho(g.who, catIsMe);
+            out.add(g);
+        }
+        return out;
+    }
+
+    /**
+     * 按「发言者」和「本机角色」判断这条消息是不是我发的。
+     *
+     * who: "cat" = 点单端（猫猫） / "teacher" = 接单端（张老师）
+     */
+    public static boolean mineForWho(String who, boolean catIsMe) {
+        boolean isCat = "cat".equals(who);
+        return isCat == catIsMe;
     }
 
     /** 公告存成单条 JSON */

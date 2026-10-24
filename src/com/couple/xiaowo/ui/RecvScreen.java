@@ -112,6 +112,7 @@ public class RecvScreen extends LinearLayout {
         com.couple.xiaowo.core.Net.setRelaxTls(
                 savedPeer != null && savedPeer.toLowerCase().startsWith("https://"));
         this.notice = Social.parseNotice(sp.getString("notice", ""));
+        // 接单端是「张老师」那一端：who=="cat" 是对方发的
         chatLog.addAll(Social.parseMsgs(sp.getString("chat", "[]"), false));
         orders.addAll(loadOrders());
         // 恢复本地保存的菜谱（否则每次启动都退回内置默认菜单）
@@ -720,6 +721,28 @@ public class RecvScreen extends LinearLayout {
         rmLp.topMargin = dp(12);
         menuCard.addView(refreshMenu, rmLp);
 
+        // 两端都能改菜谱：接单端也能改名/改价/加规格/删除
+        TextView editMenu = Ui.pill(act, "✏️ 编辑菜谱", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                12.5f, 20, 10, true);
+        editMenu.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                MenuEditor.open(act, new MenuEditor.OnChanged() {
+                    public void onChanged() {
+                        saveMenu();
+                        if (menuStamp != null) {
+                            menuStamp.setText(Menu.totalCount() + " 道");
+                        }
+                        pages[TAB_KITCHEN] = null;
+                        pushMenuToCat();
+                    }
+                });
+            }
+        });
+        LinearLayout.LayoutParams emLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        emLp.topMargin = dp(8);
+        menuCard.addView(editMenu, emLp);
+
         TextView show = Ui.pill(act, "查看完整菜单", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 12, 18, 9, true);
         show.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
@@ -888,6 +911,23 @@ public class RecvScreen extends LinearLayout {
 
         ScrollView chatScroll = new ScrollView(act);
         chatScroll.setVerticalScrollBarEnabled(false);
+        /*
+         * 修「聊天框划不动」：聊天区外面还套着一层 ScrollView（「我」页），
+         * 外层会把垂直手势吃掉。手指落在聊天区时通知父容器别拦截。
+         */
+        chatScroll.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View v, android.view.MotionEvent e) {
+                int action = e.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN
+                        || action == android.view.MotionEvent.ACTION_MOVE) {
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                } else if (action == android.view.MotionEvent.ACTION_UP
+                        || action == android.view.MotionEvent.ACTION_CANCEL) {
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                }
+                return false;
+            }
+        });
         chatBox = Ui.vertical(act);
         chatBox.setPadding(0, dp(10), 0, dp(6));
         chatScroll.addView(chatBox, new ScrollView.LayoutParams(
@@ -930,6 +970,65 @@ public class RecvScreen extends LinearLayout {
         });
         sendRow.addView(send, sLp);
         chatCard.addView(sendRow);
+
+        // ---------- 聊天记录备份 ----------
+        LinearLayout backupRow = Ui.horizontal(act);
+        backupRow.setGravity(Gravity.CENTER_VERTICAL);
+        backupRow.addView(Ui.tv(act, "聊天记录", 10.5f, Ui.TEXT_MUTED, false));
+        backupRow.addView(new View(act), new LinearLayout.LayoutParams(0, 1, 1f));
+
+        TextView exportBtn = Ui.pill(act, "⬇ 导出备份", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                11, 12, 6, true);
+        exportBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                com.couple.xiaowo.core.ChatIO.export(act, chatLog, true,
+                        new com.couple.xiaowo.core.ChatIO.OnExported() {
+                            public void onExported(String fileName, int count) {
+                                toastOk("已导出 " + count + " 条到「下载/小窝/" + fileName + "」");
+                            }
+                        },
+                        new com.couple.xiaowo.core.ChatIO.OnError() {
+                            public void onError(String msg) {
+                                toastWarn(msg);
+                            }
+                        });
+            }
+        });
+        backupRow.addView(exportBtn);
+
+        TextView importBtn = Ui.pill(act, "⬆ 导入", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                11, 12, 6, true);
+        LinearLayout.LayoutParams ibLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        ibLp.leftMargin = dp(6);
+        importBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                com.couple.xiaowo.core.ChatIO.pickImport(act, false,
+                        new com.couple.xiaowo.core.ChatIO.OnImported() {
+                            public void onImported(java.util.List<com.couple.xiaowo.core.Social.Msg> msgs,
+                                                   String fileName) {
+                                int added = com.couple.xiaowo.core.ChatIO.mergeInto(chatLog, msgs);
+                                saveChat();
+                                rebuildChat(fChatScroll);
+                                if (added > 0) {
+                                    toastOk("导入了 " + added + " 条聊天记录");
+                                } else {
+                                    toast("这个备份里的记录都已经有了");
+                                }
+                            }
+                        },
+                        new com.couple.xiaowo.core.ChatIO.OnError() {
+                            public void onError(String msg) {
+                                toastWarn(msg);
+                            }
+                        });
+            }
+        });
+        backupRow.addView(importBtn, ibLp);
+        LinearLayout.LayoutParams bkLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bkLp.topMargin = dp(8);
+        chatCard.addView(backupRow, bkLp);
 
         content.addView(chatCard);
         rebuildChat(fChatScroll);
@@ -1484,6 +1583,54 @@ public class RecvScreen extends LinearLayout {
         return null;
     }
 
+    /**
+     * 接单端改了菜谱 → 推给点单端。
+     *
+     * 通路和发消息一样：先试保存过的对端地址，再试发现，最后走中转。
+     * 异地时只有中转能把菜谱送到，所以中继这一步不能省。
+     */
+    private void pushMenuToCat() {
+        final String body = Menu.toJson();
+        Toast2.show(act, Toast2.LOADING, "正在把菜谱同步给猫猫…");
+        new Thread(new Runnable() {
+            public void run() {
+                boolean ok = false;
+                String savedHost = sp.getString("peer_host", null);
+                int savedPort = sp.getInt("peer_port", 0);
+                if (savedHost != null && savedPort > 0) {
+                    ok = Protocol.isOk(Net.post(savedHost, savedPort,
+                            Protocol.PATH_MENU, body, 2500));
+                }
+                if (!ok) {
+                    for (Net.Peer p : Net.discover(1600)) {
+                        if (Protocol.isOk(Net.post(p.host, p.port,
+                                Protocol.PATH_MENU, body, 2500))) {
+                            sp.edit().putString("peer_host", p.host)
+                                    .putInt("peer_port", p.port).apply();
+                            ok = true;
+                            break;
+                        }
+                    }
+                }
+                if (!ok && com.couple.xiaowo.core.Relay.enabled(act)) {
+                    ok = com.couple.xiaowo.core.Relay.publish(act,
+                            Protocol.TYPE_MENU, body, 8000);
+                }
+                final boolean done = ok;
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (done) {
+                            toastOk("菜谱已同步给猫猫（" + Menu.totalCount() + " 道）");
+                            host.burst(12);
+                        } else {
+                            toastWarn("没连上猫猫，菜谱先存在本机了");
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
     private void showMenuDialog() {
         StringBuilder sb = new StringBuilder();
         for (Menu.Category c : Menu.CATEGORIES) {
@@ -1567,6 +1714,8 @@ public class RecvScreen extends LinearLayout {
         for (Social.Msg m : p.chat) {
             String key = m.who + "|" + m.ts + "|" + m.text;
             if (!chatKeys.contains(key)) {
+                // 同步过来的消息：mine 按本机角色（接单端=张老师）重算
+                m.mine = Social.mineForWho(m.who, false);
                 chatLog.add(m);
                 chatKeys.add(key);
                 changed = true;

@@ -71,34 +71,67 @@ public class MakeIcon {
                 cx - headW / 2, hy - headH / 2, headW, headH, s * 0.22f, s * 0.22f);
         g.fill(head);
 
-        // 眼睛
+        /*
+         * 眼睛：「斜眼」表情包。
+         *
+         * 画法（按 48px 也能认出为准）：
+         *   1. 白色眼白椭圆
+         *   2. 瞳孔整体往同一侧偏移 —— 这是「斜眼」的关键，两只眼看同一个方向
+         *   3. 上眼皮用一条倾斜的深色粗线压下来，做出半眯的效果
+         */
         g.setColor(new Color(0x3A3546));
         float eyeDx = headW * 0.20f;
         float eyeCy = hy + headH * 0.02f;
         float rx = headW * 0.115f;
         float ry = headH * 0.135f;
+
+        // 眼白
+        g.setColor(Color.WHITE);
         g.fill(new Ellipse2D.Float(cx - eyeDx - rx, eyeCy - ry, rx * 2, ry * 2));
         g.fill(new Ellipse2D.Float(cx + eyeDx - rx, eyeCy - ry, rx * 2, ry * 2));
-        g.setColor(Color.WHITE);
-        g.fill(new Ellipse2D.Float(cx - eyeDx + rx * 0.30f - rx * 0.34f, eyeCy - ry * 0.40f - rx * 0.34f, rx * 0.68f, rx * 0.68f));
-        g.fill(new Ellipse2D.Float(cx + eyeDx + rx * 0.30f - rx * 0.34f, eyeCy - ry * 0.40f - rx * 0.34f, rx * 0.68f, rx * 0.68f));
 
-        // 腮红
-        g.setColor(new Color(255, 157, 181, 150));
-        g.fill(new Ellipse2D.Float(cx - headW * 0.40f - s * 0.05f, hy + headH * 0.16f, s * 0.10f, s * 0.07f));
-        g.fill(new Ellipse2D.Float(cx + headW * 0.40f - s * 0.05f, hy + headH * 0.16f, s * 0.10f, s * 0.07f));
+        // 瞳孔：两只一起往右偏 → 斜眼
+        g.setColor(new Color(0x3A3546));
+        float pupR = rx * 0.42f;
+        float pupOffX = rx * 0.34f;
+        float pupOffY = ry * 0.42f;
+        g.fill(new Ellipse2D.Float(cx - eyeDx + pupOffX - pupR, eyeCy + pupOffY - pupR, pupR * 2, pupR * 2));
+        g.fill(new Ellipse2D.Float(cx + eyeDx + pupOffX - pupR, eyeCy + pupOffY - pupR, pupR * 2, pupR * 2));
 
-        // 嘴巴 ω
+        // 上眼皮：倾斜粗线压住眼睛上半部 = 半眯斜眼
+        g.setColor(new Color(0x3A3546));
+        g.setStroke(new BasicStroke(s * 0.026f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        float lidY1 = eyeCy - ry * 0.86f;
+        float lidY2 = eyeCy - ry * 0.40f;
+        Path2D lidL = new Path2D.Float();
+        lidL.moveTo(cx - eyeDx - rx * 0.95f, lidY2);
+        lidL.lineTo(cx - eyeDx + rx * 0.95f, lidY1);
+        g.draw(lidL);
+        Path2D lidR = new Path2D.Float();
+        lidR.moveTo(cx + eyeDx - rx * 0.95f, lidY1);
+        lidR.lineTo(cx + eyeDx + rx * 0.95f, lidY2);
+        g.draw(lidR);
+
+        // 腮红：保留一点点，让它还是可爱的（不是嘲讽脸）
+        g.setColor(new Color(255, 157, 181, 110));
+        g.fill(new Ellipse2D.Float(cx - headW * 0.40f - s * 0.04f, hy + headH * 0.15f, s * 0.09f, s * 0.06f));
+        g.fill(new Ellipse2D.Float(cx + headW * 0.40f - s * 0.04f, hy + headH * 0.15f, s * 0.09f, s * 0.06f));
+
+        // 嘴巴：一边翘的小坏笑（配合斜眼）
         g.setColor(new Color(0x3A3546));
         g.setStroke(new BasicStroke(s * 0.020f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        float mY = hy + headH * 0.24f;
-        g.draw(new Arc2D.Float(cx - s * 0.050f, mY - s * 0.012f, s * 0.050f, s * 0.058f, 0, 180, Arc2D.OPEN));
-        g.draw(new Arc2D.Float(cx, mY - s * 0.012f, s * 0.050f, s * 0.058f, 0, 180, Arc2D.OPEN));
+        float mY = hy + headH * 0.26f;
+        Path2D mouth = new Path2D.Float();
+        mouth.moveTo(cx - s * 0.045f, mY);
+        mouth.curveTo(cx - s * 0.015f, mY + s * 0.045f,
+                cx + s * 0.035f, mY + s * 0.040f,
+                cx + s * 0.055f, mY - s * 0.010f);
+        g.draw(mouth);
 
         // 右上角小爱心
         g.setColor(new Color(0xFF4D6D));
         Path2D heart = new Path2D.Float();
-        float hx = s * 0.80f, hsz = s * 0.11f;
+        float hx = s * 0.80f, hsz = s * 0.10f;
         heart.moveTo(hx, s * 0.155f + hsz * 0.78f);
         heart.curveTo(-0.58f * hsz + hx, 0.44f * hsz + s * 0.155f, -0.96f * hsz + hx, 0.06f * hsz + s * 0.155f, -0.60f * hsz + hx, -0.26f * hsz);
         heart.curveTo(-0.36f * hsz + hx, -0.50f * hsz, -0.06f * hsz + hx, -0.40f * hsz, hx, -0.14f * hsz);
