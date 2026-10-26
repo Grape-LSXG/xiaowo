@@ -407,6 +407,9 @@ public final class Mqtt {
         }
 
         private void setOnline(boolean on, String note) {
+            if (online != on) {
+                Logs.i("mqtt", (on ? "连上 " : "断开 ") + note + "  room=" + room);
+            }
             online = on;
             if (listener != null) {
                 listener.onState(on, note);

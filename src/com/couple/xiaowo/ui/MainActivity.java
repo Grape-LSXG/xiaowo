@@ -266,6 +266,9 @@ public class MainActivity extends Activity implements HeartHost {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // 先把主题定下来，再建任何视图 —— 否则第一帧会是浅色再闪成深色
+        com.couple.xiaowo.core.Logs.init(this);
+        com.couple.xiaowo.core.Logs.i("app", "启动 " + BuildInfo.APP_NAME + " "
+                + Ui.appVersion(this) + "（" + (BuildInfo.IS_ORDER ? "点单端" : "接单端") + "）");
         Theme.init(this);
         Ui.applyTheme();
         setupWindow();

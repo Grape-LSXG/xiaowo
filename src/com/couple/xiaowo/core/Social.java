@@ -57,6 +57,9 @@ public final class Social {
          */
         public String from = "";
 
+        /** 指定收信设备（多台点单端时用）；空串 = 广播给所有设备 */
+        public String to = "";
+
         public String toJson() {
             /*
              * 必须带 type。
@@ -70,6 +73,7 @@ public final class Social {
                     "type", Json.quote(Protocol.TYPE_CHAT),
                     "who", Json.quote(who),
                     "from", Json.quote(from),
+                    "to", Json.quote(to),
                     "text", Json.quote(text),
                     "mine", mine ? "true" : "false",
                     "ts", String.valueOf(ts)));
@@ -80,6 +84,7 @@ public final class Social {
             Msg g = new Msg();
             g.who = Json.str(m, "who", "cat");
             g.from = Json.str(m, "from", "");
+            g.to = Json.str(m, "to", "");
             g.text = Json.str(m, "text", "");
             g.ts = Json.num(m, "ts", System.currentTimeMillis());
             return g;

@@ -244,6 +244,7 @@ public final class ApkMqtt {
     private static void back(Listener l, String msg) {
         running = false;
         if (l != null) {
+            Logs.e("update", msg);
             l.onError(msg);
         }
     }

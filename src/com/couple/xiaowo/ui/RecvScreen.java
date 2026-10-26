@@ -107,6 +107,8 @@ public class RecvScreen extends LinearLayout {
     private TextView relayText;
     /** 首页卡片里「已连设备」的标题行 */
     private TextView clientsText;
+    /** 聊天对象：空串=发给所有点单端；否则只发给这台 */
+    private String chatTarget = "";
     /** 已连设备列表（每台一行：机型 · 识别码 · 多久前） */
     private LinearLayout clientsBox;
     /**
@@ -830,6 +832,20 @@ public class RecvScreen extends LinearLayout {
         });
         content.addView(start, top(8));
 
+        if (Ui.pro(act)) {
+            TextView logBtn = Ui.pill(act, "🧾 运行日志", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                    12, 22, 9, true);
+            logBtn.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    LogPage.show(act);
+                }
+            });
+            LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            logLp.topMargin = dp(8);
+            content.addView(logBtn, logLp);
+        }
+
         content.addView(Ui.tv(act, Ui.pick(act,
                 "换了端口，之前连着的手机要重新连一次。",
                 "提示：换端口后，正在使用这个端口的所有连接都要重新配一次"), 10, Ui.SUB, false), top(14));
@@ -906,7 +922,11 @@ public class RecvScreen extends LinearLayout {
             TextView b = Ui.pill(act, labels[i], bg[i], fg[i], 12, 14, 8, true);
             b.setOnClickListener(new OnClickListener() {
                 public void onClick(View v) {
-                    buzzCat(level);
+                    pickTargetDevice("震哪一台？", new TargetPick() {
+                        public void onPick(String id) {
+                            buzzCat(level, id);
+                        }
+                    });
                 }
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
@@ -927,7 +947,11 @@ public class RecvScreen extends LinearLayout {
                 Ui.PRIMARY_DEEP, 12, 14, 8, true);
         shotBtn.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
-                requestShot();
+                pickTargetDevice("看哪一台的屏幕？", new TargetPick() {
+                    public void onPick(String id) {
+                        requestShot(id);
+                    }
+                });
             }
         });
         shotRow.addView(shotBtn);
@@ -993,6 +1017,49 @@ public class RecvScreen extends LinearLayout {
         csLp.topMargin = dp(2);
         chatCard.addView(chatScroll, csLp);
         final ScrollView fChatScroll = chatScroll;
+
+        /*
+         * 聊天对象：多台点单端在线时才出现。
+         *
+         * 以前只有"发给最近下单的那台"，自己调试时两台都开着根本分不清消息去哪了。
+         */
+        java.util.List<PeerClient> chatClients;
+        synchronized (orderClients) {
+            chatClients = new java.util.ArrayList<PeerClient>(orderClients.values());
+        }
+        if (chatClients.size() >= 2) {
+            LinearLayout targetRow = Ui.horizontal(act);
+            targetRow.setGravity(Gravity.CENTER_VERTICAL);
+            targetRow.setPadding(0, dp(8), 0, 0);
+            targetRow.addView(Ui.tv(act, "发给", 10.5f, Ui.TEXT_MUTED, false));
+            final String[] ids = new String[chatClients.size() + 1];
+            final String[] labels = new String[chatClients.size() + 1];
+            ids[0] = "";
+            labels[0] = "全部";
+            for (int i = 0; i < chatClients.size(); i++) {
+                ids[i + 1] = chatClients.get(i).id;
+                labels[i + 1] = chatClients.get(i).id;
+            }
+            for (int i = 0; i < ids.length; i++) {
+                final String id = ids[i];
+                boolean on = id.equals(chatTarget);
+                TextView chip = Ui.pill(act, labels[i], on ? Ui.PRIMARY : Ui.PRIMARY_SOFT,
+                        on ? 0xFFFFFFFF : Ui.PRIMARY_DEEP, 10.5f, 10, 6, true);
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                clp.leftMargin = dp(6);
+                chip.setOnClickListener(new OnClickListener() {
+                    public void onClick(View v) {
+                        chatTarget = id;
+                        switchTab(TAB_ME);
+                    }
+                });
+                targetRow.addView(chip, clp);
+            }
+            LinearLayout.LayoutParams trLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            chatCard.addView(targetRow, trLp);
+        }
 
         LinearLayout sendRow = Ui.horizontal(act);
         sendRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1214,6 +1281,9 @@ public class RecvScreen extends LinearLayout {
         column.addView(bubble);
 
         String who = mine ? "我" : "猫猫";
+        if (mine && m.to != null && m.to.length() > 0) {
+            who = "我 → " + m.to;
+        }
         if (!mine && m.from != null && m.from.length() > 0) {
             // 多台点单端时，这句话是哪台说的就能分清
             who = "猫猫(" + m.from + ")";
@@ -1257,7 +1327,31 @@ public class RecvScreen extends LinearLayout {
 
     /** 接单端发消息给点单端：订单里带过 replyHost，但聊天是随时发的，所以用发现兜底 */
     private boolean sendChatToCat(Social.Msg m) {
-        String body = m.toJson();
+        String raw = m.toJson();
+        /*
+         * 指定了聊天对象就只发给那一台：直连它的地址，直连不通再带 to 走中转
+         * （其他点单端收到 to 不是自己会直接忽略）。
+         */
+        if (chatTarget != null && chatTarget.length() > 0) {
+            m.to = chatTarget;
+            String body = Protocol.withTo(raw, chatTarget);
+            PeerClient only = null;
+            synchronized (orderClients) {
+                only = orderClients.get(chatTarget);
+            }
+            if (only != null && only.host != null && only.host.length() > 0 && only.port > 0) {
+                if (Protocol.isOk(Net.post(only.host, only.port, Protocol.PATH_CHAT, body, 2500))
+                        || Protocol.isOk(Net.post("127.0.0.1", only.port,
+                        Protocol.PATH_CHAT, body, 1200))) {
+                    return true;
+                }
+            }
+            if (com.couple.xiaowo.core.Relay.enabled(act)) {
+                return com.couple.xiaowo.core.Relay.publish(act, Protocol.ROLE_RECV, body, 8000);
+            }
+            return false;
+        }
+        String body = raw;
         // 多台点单端在线时，先给"心跳里报过地址"的每一台都送一份，
         // 否则只有最近下单的那台能收到消息，另一台像被晾着
         //
@@ -1309,6 +1403,7 @@ public class RecvScreen extends LinearLayout {
     }
 
     private void onChatIncoming(final Social.Msg m) {
+        com.couple.xiaowo.core.Logs.i("chat", "收到 " + (m.from == null || m.from.length() == 0 ? "" : m.from + "：") + m.text);
         /*
          * 去重：QoS1 的语义是"至少一次"，broker 没收到 PUBACK 会重投，
          * 同一条消息可能到达两次（重连补发离线消息时最常见）。
@@ -2209,9 +2304,8 @@ public class RecvScreen extends LinearLayout {
                             if (!Menu.fingerprint().equals(fpBefore)) {
                                 Toast2.ok(act, "菜谱已更新：" + Menu.totalCount() + " 道菜");
                                 host.burst(12);
-                            } else {
-                                Toast2.info(act, "菜谱没有变化（" + Menu.totalCount() + " 道）");
                             }
+                            // 没有变化就不提示：同步是常驻行为，天天弹「没变化」只会烦人
                         }
                     });
                     return Protocol.ack(true, Protocol.ROLE_RECV, "菜谱已同步");
@@ -2549,6 +2643,67 @@ public class RecvScreen extends LinearLayout {
      * 多台点单端同时在线时，「看屏幕」「叫一下」都必须能点名，
      * 否则三台一起响、三张截图糊一脸，根本分不清是谁。
      */
+    /** 点名目标为空的含义：全部在线设备 */
+    private interface TargetPick {
+        void onPick(String id);
+    }
+
+    /** 面板里一行按钮的布局参数（整行宽 + 顶部间距） */
+    private LinearLayout.LayoutParams pickRow(int dpTop) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(dpTop);
+        return lp;
+    }
+
+    /**
+     * 选一台点单端（多台时才弹选单）。
+     *
+     * 「看屏幕」「震动」这类动作原来直接调 requestShot()/buzzCat()，
+     * 多台点单端在线时就没法指定是谁 —— 一台会动，其他不知道怎么回事。
+     */
+    private void pickTargetDevice(String title, final TargetPick cb) {
+        java.util.List<PeerClient> list;
+        synchronized (orderClients) {
+            list = new java.util.ArrayList<PeerClient>(orderClients.values());
+        }
+        if (list.isEmpty()) {
+            cb.onPick(null);
+            return;
+        }
+        if (list.size() == 1) {
+            cb.onPick(list.get(0).id);
+            return;
+        }
+        final LinearLayout box = Ui.vertical(act);
+        final Dialog[] dlg = new Dialog[1];
+        TextView all = Ui.pill(act, "🔊 全部设备", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 13, 16, 12, false);
+        all.setGravity(Gravity.CENTER);
+        all.setMinHeight(dp(46));
+        all.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                DialogKit.dismiss(dlg[0]);
+                cb.onPick(null);
+            }
+        });
+        box.addView(all, pickRow(6));
+        for (final PeerClient c : list) {
+            String label = "📱 " + c.name + (c.device == null || c.device.length() == 0
+                    ? "" : "（" + c.device + "）");
+            TextView row = Ui.pill(act, label, 0xFFF7F5FA, Ui.TEXT, 13, 16, 12, false);
+            row.setGravity(Gravity.CENTER);
+            row.setMinHeight(dp(46));
+            row.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    DialogKit.dismiss(dlg[0]);
+                    cb.onPick(c.id);
+                }
+            });
+            box.addView(row, pickRow(6));
+        }
+        dlg[0] = DialogKit.sheet(act, title, box);
+    }
+
     private void showClientMenu(final PeerClient c) {
         final android.app.Dialog[] dlg = new android.app.Dialog[1];
         LinearLayout box = Ui.vertical(act);
@@ -2822,6 +2977,9 @@ public class RecvScreen extends LinearLayout {
     }
 
     private void onOrderArrived(final Protocol.Order o) {
+        com.couple.xiaowo.core.Logs.i("order", "收到订单 " + (o.id == null ? "?" : o.id)
+                + " 来自 " + (o.fromName == null || o.fromName.length() == 0 ? "未知" : o.fromName)
+                + "，共 " + (o.lines == null ? 0 : o.lines.size()) + " 项");
         // 下单本身也算"这台点单端在线"（老版本没有 fromId，就记不下编号，忽略即可）
         touchClient(o.fromId, o.fromName, o.replyHost, o.replyPort);
         // 去重：客户端读响应超时后会带同一个 id 重发，

@@ -149,7 +149,12 @@ public final class Relay {
                 "relayPayload", Json.quote(payload)));
         // 发布也要用同一套服务器配置（自建时公共 broker 就完全不碰了）
         Mqtt.configure(c);
-        return Mqtt.publishOnce(room, wrapped, timeoutMs);
+        long t0 = System.currentTimeMillis();
+        boolean ok = Mqtt.publishOnce(room, wrapped, timeoutMs);
+        Logs.i("relay", (ok ? "发出 " : "发失败 ") + typeOf(payload)
+                + "  " + (System.currentTimeMillis() - t0) + "ms  room=" + room
+                + "  mode=" + mode(c));
+        return ok;
     }
 
     /** 解包一条中转消息；不是我们格式的返回 null */

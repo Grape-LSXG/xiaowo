@@ -1,14 +1,14 @@
 {
   "order": {
-    "versionCode": 49,
-    "versionName": "4.10",
+    "versionCode": 50,
+    "versionName": "4.11",
     "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-order.apk",
-    "notes": "v4.10：把「房间码」和「服务器」拆成两种连接方式（小窝云 / 房间码 / 自建服务器），首页状态按实际通道显示；更新通道改成 MQTT 分块直传（连不上 GitHub 也能从接单端拿包）；公告、爱心、安装回执全部补上中转兜底；多台点单端可点名截图/震动，聊天显示来源设备；新增专业模式（默认简洁文案）；回前台自动重连，弱网重传更稳"
+    "notes": "v4.11：聊天可以选发给哪一台设备（多台点单端时），看屏幕/震动也能点名；聊天输入框展开后是长条，不再被挤成胶囊；菜谱没变化不再提示；专业模式新增运行日志（可复制发我排查）"
   },
   "recv": {
-    "versionCode": 49,
-    "versionName": "4.10",
+    "versionCode": 50,
+    "versionName": "4.11",
     "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-recv.apk",
-    "notes": "v4.10：把「房间码」和「服务器」拆成两种连接方式（小窝云 / 房间码 / 自建服务器），首页状态按实际通道显示；更新通道改成 MQTT 分块直传（连不上 GitHub 也能从接单端拿包）；公告、爱心、安装回执全部补上中转兜底；多台点单端可点名截图/震动，聊天显示来源设备；新增专业模式（默认简洁文案）；回前台自动重连，弱网重传更稳"
+    "notes": "v4.11：聊天可以选发给哪一台设备（多台点单端时），看屏幕/震动也能点名；聊天输入框展开后是长条，不再被挤成胶囊；菜谱没变化不再提示；专业模式新增运行日志（可复制发我排查）"
   }
 }

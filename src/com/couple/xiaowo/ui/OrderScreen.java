@@ -674,6 +674,9 @@ public class OrderScreen extends LinearLayout {
                 act.runOnUiThread(new Runnable() {
                     public void run() {
                         sending = false;
+                        com.couple.xiaowo.core.Logs.i("order", fResp != null
+                                ? ("下单成功 via=" + fUsed + " 共 " + order.lines.size() + " 项")
+                                : "下单失败：所有通路都不通");
                         if (fResp != null) {
                             // 走中转时不记地址：fUsed 是 "relay"，写进 peer_host
                             // 会让下次启动拿它当 IP 去连（连不上还耽误时间）
@@ -1825,6 +1828,9 @@ public class OrderScreen extends LinearLayout {
         input.setPadding(dp(14), dp(10), dp(14), dp(10));
         input.setSingleLine(true);
         input.setGravity(Gravity.CENTER_VERTICAL);
+        // 多行时不横向滚动，否则长句只在一条线里挤着走，看着像"溢出"
+        input.setHorizontallyScrolling(false);
+        input.setVerticalScrollBarEnabled(false);
         /*
          * 输入框高度：收起 40dp、点开 132dp。
          *
@@ -1840,11 +1846,21 @@ public class OrderScreen extends LinearLayout {
                 // 展开时允许多行换行，收起时回到单行（回车即发送的直觉）
                 if (hasFocus) {
                     input.setSingleLine(false);
-                    input.setMaxLines(6);
+                    input.setMaxLines(5);
                     input.setGravity(Gravity.TOP | Gravity.START);
+                    input.setPadding(dp(14), dp(10), dp(14), dp(10));
+                    /*
+                     * 展开时长条用 14dp 圆角 —— 半径 999 在 132dp 高的框上
+                     * 会变成一个巨大的胶囊（看着像"圆角矩形"，文字还被挤在中间），
+                     * 这里显式换成长条形状。
+                     */
+                    input.setBackground(Ui.round(0xFFF7F4FB, dp(14)));
+                    input.setVerticalScrollBarEnabled(true);
                 } else {
                     input.setSingleLine(true);
                     input.setGravity(Gravity.CENTER_VERTICAL);
+                    input.setBackground(Ui.round(0xFFF7F4FB, dp(999)));
+                    input.setVerticalScrollBarEnabled(false);
                 }
                 final ViewGroup.LayoutParams lp = input.getLayoutParams();
                 android.animation.ValueAnimator va = android.animation.ValueAnimator
@@ -1999,6 +2015,21 @@ public class OrderScreen extends LinearLayout {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         proLp.topMargin = dp(12);
         content.addView(proBtn, proLp);
+
+        // ---------- 日志（只有专业模式才出现） ----------
+        if (Ui.pro(act)) {
+            TextView logBtn = Ui.pill(act, "🧾 运行日志", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                    12, 22, 9, true);
+            logBtn.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    LogPage.show(act);
+                }
+            });
+            LinearLayout.LayoutParams logLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            logLp.topMargin = dp(8);
+            content.addView(logBtn, logLp);
+        }
 
         // ---------- 连接 / 清空 ----------
         TextView conn = Ui.pill(act, "⇄ 连接设置", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 12, 22, 9, true);
@@ -2913,6 +2944,7 @@ public class OrderScreen extends LinearLayout {
         new Thread(new Runnable() {
             public void run() {
                 final boolean ok = tryPost(Protocol.PATH_CHAT, m.toJson());
+                com.couple.xiaowo.core.Logs.i("chat", (ok ? "发出" : "发失败") + "：" + m.text);
                 if (!ok) {
                     act.runOnUiThread(new Runnable() {
                         public void run() {
@@ -3148,6 +3180,8 @@ public class OrderScreen extends LinearLayout {
     private void applyMenuFromPeer(final String body, final String tip) {
         act.runOnUiThread(new Runnable() {
             public void run() {
+                // 先记指纹：内容一样就别再提示"已更新"，同步是常驻行为
+                String fpBefore = Menu.fingerprint();
                 Menu.applyJson(body, true);
                 saveMenuToDisk();
                 byName.clear();
@@ -3165,7 +3199,9 @@ public class OrderScreen extends LinearLayout {
                 } else if (tab == TAB_MANAGE) {
                     switchTab(TAB_MANAGE);
                 }
-                Toast2.ok(act, tip);
+                if (!Menu.fingerprint().equals(fpBefore)) {
+                    Toast2.ok(act, tip);
+                }
             }
         });
     }
