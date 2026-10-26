@@ -272,7 +272,8 @@ public class OrderScreen extends LinearLayout {
         final String name = com.couple.xiaowo.core.Client.label(act);
         final String host = Net.localIpv4();
         final int port = server != null ? server.port() : 0;
-        final String body = Protocol.presence(id, name, host, port);
+        final String body = Protocol.presence(id, name, host, port,
+                com.couple.xiaowo.core.Client.device());
         final String knownHost = peerHost;
         final int knownPort = peerPort;
         new Thread(new Runnable() {
@@ -596,7 +597,22 @@ public class OrderScreen extends LinearLayout {
                 String used = null;
                 int usedPort = 0;
 
-                if (peerHost != null && peerPort > 0) {
+                /*
+                 * 如果配了云端中转（EMQX Serverless 之类）而对方直连地址还是空的，
+                 * 说明大概率不在同一个网络：先走 MQTT，别让用户白等 5 秒直连超时。
+                 * 订单带同一个 id，接单端会去重，多试一条通路不会记两单。
+                 */
+                boolean relayFirst = Relay.enabled(act)
+                        && (peerHost == null || peerHost.length() == 0);
+                if (relayFirst) {
+                    if (Relay.publish(act, Protocol.ROLE_ORDER, order.toJson(), 8000)) {
+                        resp = "{\"ok\":true,\"via\":\"relay\"}";
+                        used = "relay";
+                        usedPort = 0;
+                    }
+                }
+
+                if (resp == null && peerHost != null && peerPort > 0) {
                     // 超时不一定等于没送到：很可能是对方已经处理完、
                     // 只是响应没读到（后台进程被冻结就是这个表现）。
                     // 所以重试一次 —— 订单带同一个 id，接单端会去重，不会记两遍。

@@ -47,4 +47,24 @@ public final class Client {
     public static String label(Context c) {
         return Protocol.NAME_ORDER + "(" + id(c) + ")";
     }
+
+    /**
+     * 这台手机叫什么（如 "V2502A"）。
+     *
+     * 编号 A3F2 只能区分"哪一台"，看不出是"谁的哪台"，
+     * 所以心跳里再带一个机型名，接单端的设备列表就一眼能读懂。
+     * 只用 Build.MODEL，不申请任何权限、不上传可识别信息。
+     */
+    public static String device() {
+        try {
+            String m = android.os.Build.MODEL;
+            if (m == null) {
+                return "手机";
+            }
+            m = m.trim();
+            return m.length() == 0 ? "手机" : m;
+        } catch (Throwable t) {
+            return "手机";
+        }
+    }
 }

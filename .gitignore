@@ -19,3 +19,6 @@ tools/sdk/
 __pycache__/
 *.pyc
 .DS_Store
+
+# 云端预置（含密码，绝不入库）
+assets/cloud.properties

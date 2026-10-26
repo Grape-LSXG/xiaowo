@@ -102,9 +102,12 @@ PYEOF
   if [ "$role" = "order" ] && [ -d "$ROOT/assets/apk" ]; then
     assetsDir="$wd/assets-role"
     mkdir -p "$assetsDir"
-    # 只带 cat 图，不带 apk 目录
+    # 只带 cat 图，不带 apk 目录（云端预置要带上，否则点单端不会用预置服务器）
     if [ -d "$ROOT/assets/cats" ]; then
       cp -r "$ROOT/assets/cats" "$assetsDir/"
+    fi
+    if [ -f "$ROOT/assets/cloud.properties" ]; then
+      cp -f "$ROOT/assets/cloud.properties" "$assetsDir/"
     fi
   fi
 

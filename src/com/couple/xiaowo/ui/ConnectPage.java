@@ -398,8 +398,9 @@ public final class ConnectPage {
          */
         Mqtt.configure(act);
         final TextView srv = Ui.tv(act, "服务器：" + Mqtt.endpointText()
-                + (Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"),
-                10, Mqtt.hasOwnBroker() ? Ui.SUCCESS : Ui.TEXT_MUTED, false);
+                + (Mqtt.usingPreset() ? "（已预置，不用配）"
+                   : Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"),
+                10, (Mqtt.hasOwnBroker() || Mqtt.usingPreset()) ? Ui.SUCCESS : Ui.TEXT_MUTED, false);
         card.addView(srv, top(act, 6));
         TextView selfHost = Ui.pill(act, Mqtt.hasOwnBroker() ? "改自建服务器" : "自建服务器",
                 Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 11, 12, 8, true);
@@ -488,9 +489,10 @@ public final class ConnectPage {
                 Mqtt.saveBroker(act, h, p, u, pw, tls[0]);
                 if (label != null) {
                     label.setText("服务器：" + Mqtt.endpointText()
-                            + (Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"));
+                            + (Mqtt.usingPreset() ? "（已预置，不用配）"
+                               : Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"));
                     label.setTextColor(Theme.adapt(
-                            Mqtt.hasOwnBroker() ? Ui.SUCCESS : Ui.TEXT_MUTED));
+                            (Mqtt.hasOwnBroker() || Mqtt.usingPreset()) ? Ui.SUCCESS : Ui.TEXT_MUTED));
                 }
                 if (act instanceof MainActivity) {
                     ((MainActivity) act).restartRelay();

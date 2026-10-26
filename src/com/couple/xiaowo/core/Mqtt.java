@@ -69,6 +69,8 @@ public final class Mqtt {
     private static String cfgPass;
     private static boolean cfgTls;
     private static String cfgUid;
+    /** 当前是否在用打包进来的云端预置（用户没手动配过服务器时） */
+    private static boolean cfgPreset;
 
     /**
      * 从 SP 读一次配置（静态字段）。
@@ -80,10 +82,18 @@ public final class Mqtt {
             return;
         }
         try {
+            Cloud.load(c);
             SharedPreferences sp = c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
             String h = sp.getString(SP_HOST, "");
             cfgHost = (h == null || h.trim().length() == 0) ? null : h.trim();
             cfgPort = sp.getInt(SP_PORT, PORT);
+            cfgPreset = false;
+            if (cfgHost == null && Cloud.has()) {
+                // 用户没配过自建服务器 → 用打包进来的云端预置（EMQX Serverless 之类）
+                cfgHost = Cloud.host();
+                cfgPort = Cloud.port();
+                cfgPreset = true;
+            }
             if (cfgPort <= 0 || cfgPort > 65535) {
                 cfgPort = PORT;
             }
@@ -92,6 +102,12 @@ public final class Mqtt {
             String pw = sp.getString(SP_PASS, "");
             cfgPass = (pw == null || pw.length() == 0) ? null : pw;
             cfgTls = sp.getBoolean(SP_TLS, false);
+            if (cfgPreset) {
+                // 预置模式：账号密码/TLS 也跟着预置走（用户手动保存过的另说——那样 cfgHost 就不是预置了）
+                cfgUser = Cloud.user();
+                cfgPass = Cloud.pass();
+                cfgTls = Cloud.tls();
+            }
             String uid = sp.getString(SP_UID, "");
             if (uid == null || uid.length() == 0) {
                 uid = Long.toHexString(new Random().nextLong() & 0x7FFFFFFFFFFFFFFFL);
@@ -154,7 +170,13 @@ public final class Mqtt {
         if (!hasOwnBroker()) {
             return "公共 broker";
         }
-        return cfgHost + ":" + cfgPort + (cfgTls ? " (TLS)" : "");
+        String prefix = cfgPreset ? "云端 " : "";
+        return prefix + cfgHost + ":" + cfgPort + (cfgTls ? " (TLS)" : "");
+    }
+
+    /** 是否在用打包进来的云端服务器（UI 上用来显示"已预置、不用配"） */
+    public static boolean usingPreset() {
+        return cfgPreset;
     }
 
     private static String hostFor(String room) {

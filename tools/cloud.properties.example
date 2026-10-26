@@ -1,0 +1,13 @@
+# 云端 MQTT 预置模板（复制成 assets/cloud.properties 再填）
+# 作用：两端装好就自动连云端，点单端不用再填任何东西。
+# ⚠️ cloud.properties 不进 git（.gitignore 已排除），只在本地打包进 APK。
+
+# EMQX Cloud Serverless 部署的接入地址（控制台 → 部署概览 → 连接地址）
+host=xxxxxxxx.ala.cn-hangzhou.emqxsl.cn
+port=8883
+# 控制台 → 访问控制 → 认证 → 添加的用户名/密码
+user=xiaowo
+pass=换成你的密码
+tls=true
+# 两端共用的房间码（可选；不填就让用户自己配对）
+room=WX8888

@@ -78,6 +78,8 @@ public class RecvScreen extends LinearLayout {
     private static final class PeerClient {
         String id = "";
         String name = "";
+        /** 机型（如 "V2502A"），心跳里带上来，设备列表里显示 */
+        String device = "";
         String host = "";
         int port = 0;
         long seen = 0L;
@@ -102,8 +104,10 @@ public class RecvScreen extends LinearLayout {
     private TextView connectHint;
     private TextView tsText;
     private TextView relayText;
-    /** 首页卡片里「现在几个点单端在线」那一行 */
+    /** 首页卡片里「已连设备」的标题行 */
     private TextView clientsText;
+    /** 已连设备列表（每台一行：机型 · 识别码 · 多久前） */
+    private LinearLayout clientsBox;
     /**
      * 在线点单端：设备编号 → 记录。
      *
@@ -437,9 +441,12 @@ public class RecvScreen extends LinearLayout {
             ((MainActivity) act).bindRelayStatus(relayText, "🌐 异地中转：");
         }
 
-        // ---- 现在有几个点单端连着（多端点单/自己调试时看这里）----
-        clientsText = Ui.tv(act, "📱 点单端：0 个在线", 10.5f, Ui.TEXT_MUTED, false);
-        card.addView(clientsText, top(4));
+        // ---- 已连接的设备（多端点单/自己调试时看这里）----
+        // 只给接单端看：点单端看不到"有几个连上了"，省得自己吓自己
+        clientsText = Ui.tv(act, "📱 已连接设备：0 台", 10.5f, Ui.TEXT_MUTED, false);
+        card.addView(clientsText, top(6));
+        clientsBox = Ui.vertical(act);
+        card.addView(clientsBox, top(2));
 
         TextView hint = Ui.tv(act, "同一个 Wi-Fi：猫猫留空就能自动找到你\n"
                         + "异地：让猫猫连同一个 Tailscale 账号，填上面的地址",
@@ -2064,7 +2071,8 @@ public class RecvScreen extends LinearLayout {
                     // 点单端的心跳：记下这台设备 + 它的回信地址
                     Map<String, Object> m = Json.asObject(Json.parse(body));
                     touchClient(Json.str(m, "id", ""), Json.str(m, "name", ""),
-                            Json.str(m, "host", ""), (int) Json.num(m, "port", 0));
+                            Json.str(m, "host", ""), (int) Json.num(m, "port", 0),
+                            Json.str(m, "device", ""));
                     return Protocol.ack(true, Protocol.ROLE_RECV, "知道你在");
                 }
                 if (Protocol.PATH_ORDER.equals(path)) {
@@ -2204,7 +2212,8 @@ public class RecvScreen extends LinearLayout {
             if (Protocol.TYPE_PRESENCE.equals(type)) {
                 Map<String, Object> m = Json.asObject(Json.parse(payload));
                 touchClient(Json.str(m, "id", ""), Json.str(m, "name", ""),
-                        Json.str(m, "host", ""), (int) Json.num(m, "port", 0));
+                        Json.str(m, "host", ""), (int) Json.num(m, "port", 0),
+                        Json.str(m, "device", ""));
             } else if (Protocol.TYPE_ORDER.equals(type)) {
                 final Protocol.Order o = Protocol.Order.fromJson(payload);
                 onOrderArrived(o);
@@ -2320,6 +2329,11 @@ public class RecvScreen extends LinearLayout {
      */
     private void touchClient(final String id, final String name,
                              final String host, final int port) {
+        touchClient(id, name, host, port, "");
+    }
+
+    private void touchClient(final String id, final String name,
+                             final String host, final int port, final String device) {
         if (id == null || id.length() == 0) {
             return;
         }
@@ -2336,6 +2350,9 @@ public class RecvScreen extends LinearLayout {
                         orderClients.put(id, c);
                     }
                     c.name = (name == null || name.length() == 0) ? Protocol.NAME_ORDER : name;
+                    if (device != null && device.length() > 0) {
+                        c.device = device;
+                    }
                     if (host != null && host.length() > 0) {
                         c.host = host;
                     }
@@ -2368,26 +2385,77 @@ public class RecvScreen extends LinearLayout {
         }
     }
 
-    /** 刷新首页卡片上「几个点单端在线」那一行 */
+    /**
+     * 刷新首页卡片里的「已连接设备」：标题 + 一台一行。
+     *
+     * 每行长这样：　● V2502A · 猫猫(A3F2) · 刚刚
+     *   · 机型来自心跳里的 Build.MODEL
+     *   · 识别码就是 Client.id()，同一台手机永远不变，方便对照是哪一台
+     *   · 时间做成"刚刚/N 秒前/N 分钟前"，掉线后也能看出最后活跃时间
+     */
     private void refreshClients() {
         if (clientsText == null) {
             return;
         }
         pruneClients();
-        StringBuilder sb = new StringBuilder();
+        java.util.List<PeerClient> list = new java.util.ArrayList<PeerClient>();
         synchronized (orderClients) {
-            if (orderClients.isEmpty()) {
-                clientsText.setText("📱 点单端：还没有谁在线");
-                clientsText.setTextColor(Theme.adapt(Ui.TEXT_MUTED));
-                return;
-            }
-            sb.append("📱 点单端：").append(orderClients.size()).append(" 个在线");
-            for (PeerClient c : orderClients.values()) {
-                sb.append("　·　").append(c.name);
-            }
+            list.addAll(orderClients.values());
         }
-        clientsText.setText(sb.toString());
+        if (list.isEmpty()) {
+            clientsText.setText("📱 已连接设备：0 台");
+            clientsText.setTextColor(Theme.adapt(Ui.TEXT_MUTED));
+            if (clientsBox != null) {
+                clientsBox.removeAllViews();
+            }
+            return;
+        }
+        clientsText.setText("📱 已连接设备：" + list.size() + " 台");
         clientsText.setTextColor(Theme.adapt(0xFF16A34A));
+        if (clientsBox == null) {
+            return;
+        }
+        clientsBox.removeAllViews();
+        long now = System.currentTimeMillis();
+        for (PeerClient c : list) {
+            LinearLayout row = new LinearLayout(act);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+            View dot = new View(act);
+            dot.setBackground(Ui.round(0xFF16A34A, dp(4)));
+            LinearLayout.LayoutParams dlp =
+                    new LinearLayout.LayoutParams(dp(8), dp(8));
+            dlp.rightMargin = dp(7);
+            row.addView(dot, dlp);
+
+            StringBuilder sb = new StringBuilder();
+            if (c.device != null && c.device.length() > 0) {
+                sb.append(c.device).append(" · ");
+            }
+            sb.append(c.name);
+            sb.append(" · ").append(agoText(now - c.seen));
+            TextView tv = Ui.tv(act, sb.toString(), 10.5f, Ui.TEXT_SUB, false);
+            row.addView(tv, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            clientsBox.addView(row, top(3));
+        }
+    }
+
+    /** 多久之前（心跳是 25 秒一次，所以这里大多显示"刚刚"） */
+    private String agoText(long ms) {
+        if (ms < 3000) {
+            return "刚刚";
+        }
+        long sec = ms / 1000;
+        if (sec < 60) {
+            return sec + " 秒前";
+        }
+        long min = sec / 60;
+        if (min < 60) {
+            return min + " 分钟前";
+        }
+        return (min / 60) + " 小时前";
     }
 
     /** 每 15 秒扫一遍：掉线的剔掉、显示刷一下（没有心跳就永远"在线"是假的） */

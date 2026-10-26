@@ -36,7 +36,17 @@ public final class Relay {
     }
 
     public static String room(Context c) {
-        return sp(c).getString(KEY_ROOM, null);
+        String r = sp(c).getString(KEY_ROOM, null);
+        if (r != null && r.length() > 0) {
+            return r;
+        }
+        // 没配过房间码、但 APK 里预置了云端：
+        // 两端都用预置房间码，装好即通，点单端不用再扫码/填码。
+        Cloud.load(c);
+        if (Cloud.has() && Cloud.room() != null) {
+            return Cloud.room();
+        }
+        return null;
     }
 
     public static void setRoom(Context c, String room) {
@@ -44,7 +54,17 @@ public final class Relay {
     }
 
     public static boolean enabled(Context c) {
-        return room(c) != null && sp(c).getBoolean(KEY_ON, true);
+        String r = room(c);
+        if (r == null) {
+            return false;
+        }
+        // 用预置房间码时一律算开启：用户没手动配过、也没手动关过，
+        // 就不该被以前遗留的 KEY_ON=false 挡住（否则装好还是连不上）。
+        boolean local = sp(c).getString(KEY_ROOM, null) != null;
+        if (!local) {
+            return true;
+        }
+        return sp(c).getBoolean(KEY_ON, true);
     }
 
     public static void setEnabled(Context c, boolean on) {

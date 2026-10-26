@@ -1,14 +1,14 @@
 {
   "order": {
-    "versionCode": 47,
-    "versionName": "4.8",
+    "versionCode": 48,
+    "versionName": "4.9",
     "url": "https://Grape-LSXG.github.io/xiaowo/xiaowo/xiaowo-order.apk",
-    "notes": "v4.8：\n· 协议层升级到 QoS1：发布等 PUBACK 才算发出，订阅 QoS1，broker 收不到确认会重投\n· 会话保持：订阅连接固定 clientId + clean session=0，断线期间的 QoS1 消息由 broker 攒着，重连后补发\n· 订单/聊天去重：重投不会重复记两条\n· 自建服务器文档补充 QoS1 与会话保持的说明（docs/self-host-relay.md）"
+    "notes": "版本 v4.9 大幅优化消息稳定性：改用自建 EMQX 云端中转（TLS 加密）、心跳保活 + QoS1 会话保持，异地收单不再漏、不再假「已送达」；接单端新增已连设备列表（机型 + 识别码）"
   },
   "recv": {
-    "versionCode": 47,
-    "versionName": "4.8",
+    "versionCode": 48,
+    "versionName": "4.9",
     "url": "https://Grape-LSXG.github.io/xiaowo/xiaowo/xiaowo-recv.apk",
-    "notes": "v4.8：\n· 协议层升级到 QoS1：发布等 PUBACK 才算发出，订阅 QoS1，broker 收不到确认会重投\n· 会话保持：订阅连接固定 clientId + clean session=0，断线期间的 QoS1 消息由 broker 攒着，重连后补发\n· 订单/聊天去重：重投不会重复记两条\n· 自建服务器文档补充 QoS1 与会话保持的说明（docs/self-host-relay.md）"
+    "notes": "版本 v4.9 大幅优化消息稳定性：改用自建 EMQX 云端中转（TLS 加密）、心跳保活 + QoS1 会话保持，异地收单不再漏、不再假「已送达」；接单端新增已连设备列表（机型 + 识别码）"
   }
 }

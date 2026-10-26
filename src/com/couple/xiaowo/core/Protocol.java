@@ -300,7 +300,12 @@ public final class Protocol {
     }
 
     public static String presence(String id, String name, String host, int port) {
+        return presence(id, name, host, port, "");
+    }
+
+    public static String presence(String id, String name, String host, int port, String device) {
         return Json.object(Json.fields(
+                "device", Json.quote(device == null ? "" : device),
                 "type", Json.quote(TYPE_PRESENCE),
                 "role", Json.quote(ROLE_ORDER),
                 "id", Json.quote(id),
