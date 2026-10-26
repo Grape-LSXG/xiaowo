@@ -1268,6 +1268,17 @@ public class RecvScreen extends LinearLayout {
     }
 
     private void onChatIncoming(final Social.Msg m) {
+        /*
+         * 去重：QoS1 的语义是"至少一次"，broker 没收到 PUBACK 会重投，
+         * 同一条消息可能到达两次（重连补发离线消息时最常见）。
+         * 消息本身没有 id，就拿 ts+text 当指纹，在最近 200 条里比一遍。
+         */
+        for (int i = chatLog.size() - 1; i >= 0; i--) {
+            Social.Msg old = chatLog.get(i);
+            if (old.ts == m.ts && old.text != null && old.text.equals(m.text)) {
+                return;
+            }
+        }
         m.mine = false;
         chatLog.add(m);
         while (chatLog.size() > 200) {

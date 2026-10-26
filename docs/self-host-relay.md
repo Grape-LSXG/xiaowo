@@ -53,7 +53,32 @@ broker 收下了不代表对方收到了 —— 对方正好在重连空窗里�
 |---|---|
 | 国内连通性差 | `broker.hivemq.com` / `test.mosquitto.org` 经常连不上、丢包、被限速；`broker.emqx.io` 时好时坏 |
 | 没有鉴权、topic 全公开 | 任何人 `mosquitto_sub -t 'xiaowo/#'` 就能看到**所有情侣的**订单和聊天（房间码只有 6 位） |
-| 没有 QoS1 / 会话保持 | 断了就丢，没有"离线补发"这回事 |
+| 没有 QoS1 / 会话保持 | 断了就丢，没有"离线补发"这回事（协议层 v4.8 已修，见 3.5） |
+
+### 3.5 QoS1 与会话保持：v4.8 把协议层换成了 QoS1
+
+之前是"手写的、只到 QoS0"的客户端：订阅 QoS0、发布 QoS0、`clean session = 1`、
+发布不等确认。这三点合起来就是"断线窗口里必丢消息"。
+
+v4.8 全部改了（`src/com/couple/xiaowo/core/Mqtt.java`）：
+
+| 项目 | 以前 | 现在 |
+|---|---|---|
+| 订阅 | `SUBSCRIBE` QoS0，`clean session=1` | `SUBSCRIBE` **QoS1**，`clean session=0` + **固定 clientId**（`xiaowo-s-<本机安装编号>`），broker 会替我们攒断线期间的 QoS1 消息 |
+| 发布 | QoS0，写进 socket 就 `return true` | **QoS1**，必须收到 `PUBACK` 才返回成功；`publishOnce()` 的返回值现在是真的 |
+| 收消息 | 只处理 QoS0 的 PUBLISH | 按首字节算 QoS，QoS1 先回 `PUBACK` 再交给业务层；订阅阶段也会边等 `SUBACK` 边处理补发过来的离线消息 |
+| 重投 | —— | 订单按 `order.id` 去重（`RecvScreen.onOrderArrived`），聊天按 `ts+文本` 去重（两端 `onChatIncoming`） |
+
+自建服务器上配合两行配置（第 4 节的 `xiaowo.conf` 里已写）：
+
+```
+persistent_client_expiration 2h   # 会话别无限堆在 broker 上
+max_keepalive 120
+```
+
+> 仍然**没做**的：本地离线队列（手机完全没网时点单，只能靠"回执超时提示"兜底）。
+> 要做的话得在客户端落盘待发队列，属于下一步。
+
 
 自己一台 mosquitto：国内延迟个位数毫秒、可以开账号密码 + 按房间 ACL、可以上 TLS、
 连接数不受别人影响。

@@ -57,12 +57,18 @@ public final class Mqtt {
     public static final String SP_USER = "broker_user";
     public static final String SP_PASS = "broker_pass";
     public static final String SP_TLS = "broker_tls";
+    /**
+     * 本机安装编号：订阅用固定 clientId 时必须稳定，否则每次重连都是新会话，
+     * broker 攒的离线消息就投不出来（会话保持的前提就是 clientId 不变）。
+     */
+    public static final String SP_UID = "client_uid";
 
     private static String cfgHost;
     private static int cfgPort = PORT;
     private static String cfgUser;
     private static String cfgPass;
     private static boolean cfgTls;
+    private static String cfgUid;
 
     /**
      * 从 SP 读一次配置（静态字段）。
@@ -86,8 +92,22 @@ public final class Mqtt {
             String pw = sp.getString(SP_PASS, "");
             cfgPass = (pw == null || pw.length() == 0) ? null : pw;
             cfgTls = sp.getBoolean(SP_TLS, false);
+            String uid = sp.getString(SP_UID, "");
+            if (uid == null || uid.length() == 0) {
+                uid = Long.toHexString(new Random().nextLong() & 0x7FFFFFFFFFFFFFFFL);
+                if (uid.length() > 10) {
+                    uid = uid.substring(0, 10);
+                }
+                sp.edit().putString(SP_UID, uid).apply();
+            }
+            cfgUid = uid;
         } catch (Exception ignore) {
         }
+    }
+
+    /** 本机安装编号（订阅会话用，保证重连还是同一个会话） */
+    public static String clientUid() {
+        return cfgUid == null ? "local" : cfgUid;
     }
 
     /** 保存自建服务器配置（空字符串表示清掉、回到公共 broker） */
@@ -219,18 +239,19 @@ public final class Mqtt {
         return out;
     }
 
-    private static byte[] connectPacket(String clientId) {
+    private static byte[] connectPacket(String clientId, boolean clean) {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         writeAll(body, utf8("MQTT"));
         body.write(4);        // 协议级别 4 = 3.1.1
 
         /*
          * connect flags：
-         *   bit1 clean session —— 保持 1（我们没有本地离线队列，
-         *     换 persistent session 还得处理重投递，收益不抵复杂度）
+         *   bit1 clean session —— 订阅连接置 0（会话保持）：断线期间 broker 会把
+         *     QoS1 消息替我们攒着，重连后补发，这是"离线段也要能收到"的关键。
+         *     一次性发布连接仍然置 1（发完就走，不需要会话）。
          *   bit7 username、bit6 password —— 自建服务器要鉴权时置位
          */
-        int flags = 0x02;
+        int flags = clean ? 0x02 : 0x00;
         if (cfgUser != null) {
             flags |= 0x80;
         }
@@ -250,21 +271,30 @@ public final class Mqtt {
         return frame(0x10, body.toByteArray());
     }
 
-    private static byte[] subscribePacket(int pid, String topic) {
+    private static byte[] subscribePacket(int pid, String topic, int qos) {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         body.write((pid >> 8) & 0xFF);
         body.write(pid & 0xFF);
         writeAll(body, utf8(topic));
-        body.write(0);        // QoS 0
+        body.write(qos);
         return frame(0x82, body.toByteArray());
     }
 
-    private static byte[] publishPacket(String topic, String payload) {
+    private static byte[] publishPacket(int pid, String topic, String payload, int qos) {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         writeAll(body, utf8(topic));
+        if (qos > 0) {
+            body.write((pid >> 8) & 0xFF);
+            body.write(pid & 0xFF);
+        }
         byte[] p = payload.getBytes(StandardCharsets.UTF_8);
         writeAll(body, p);
-        return frame(0x30, body.toByteArray());   // QoS0
+        return frame(qos > 0 ? 0x32 : 0x30, body.toByteArray());
+    }
+
+    /** PUBACK：告诉 broker "这条 QoS1 我收到了"（不发的话 broker 会一直重投） */
+    private static byte[] pubackPacket(int pid) {
+        return new byte[]{ 0x40, 2, (byte) ((pid >> 8) & 0xFF), (byte) (pid & 0xFF) };
     }
 
     private static byte[] pingPacket() {
@@ -367,8 +397,8 @@ public final class Mqtt {
                     OutputStream out = s.getOutputStream();
                     InputStream in = s.getInputStream();
 
-                    String cid = "xiaowo-" + Math.abs(rnd.nextLong() % 1000000000L);
-                    out.write(connectPacket(cid));
+                    String cid = "xiaowo-s-" + clientUid();
+                    out.write(connectPacket(cid, false));
                     out.flush();
 
                     int[] hdr = new int[1];
@@ -376,18 +406,48 @@ public final class Mqtt {
                     if (hdr[0] != 0x20 || ack == null || ack.length < 2 || ack[1] != 0) {
                         throw new Exception("CONNACK 失败");
                     }
-                    out.write(subscribePacket(1, topic(room)));
+                    out.write(subscribePacket(1, topic(room), 1));
                     out.flush();
                     /*
                      * 必须等 SUBACK 才算真的订阅上了。
                      * 之前是写完 SUBSCRIBE 就立刻置 online=true，
                      * 调用方可能在这个瞬间发消息 —— broker 还没完成注册，
                      * 消息会被直接丢掉（实测踩到过）。
+                     *
+                     * 会话保持模式下订阅本身是"恢复已有会话"，
+                     * 但为了把订阅的 QoS 提到 1，重连时照发一次 SUBSCRIBE；
+                     * 这期间 broker 可能已经开始投递离线消息，所以这段循环
+                     * 顺手把 PUBLISH 也处理掉，不能死等都 0x90。
                      */
-                    int[] sh = new int[1];
-                    byte[] suback = readPacket(in, sh);
-                    if (sh[0] != 0x90) {
-                        throw new Exception("SUBACK 失败");
+                    boolean subscribed = false;
+                    long subDeadline = System.currentTimeMillis() + 8000;
+                    while (!subscribed && !stop) {
+                        int[] sh = new int[1];
+                        byte[] pkt;
+                        try {
+                            pkt = readPacket(in, sh);
+                        } catch (java.net.SocketTimeoutException te) {
+                            if (System.currentTimeMillis() > subDeadline) {
+                                throw new Exception("SUBACK 失败");
+                            }
+                            continue;
+                        }
+                        if (pkt == null) {
+                            throw new Exception("SUBACK 失败");
+                        }
+                        if (sh[0] == 0x90) {
+                            subscribed = true;
+                        } else if ((sh[0] & 0xF0) == 0x30) {
+                            int qos = (sh[0] >> 1) & 0x03;
+                            String payload = parsePublish(pkt, qos);
+                            if (qos > 0) {
+                                out.write(pubackPacket(pidOf(pkt)));
+                                out.flush();
+                            }
+                            if (payload != null && listener != null) {
+                                listener.onMessage(payload);
+                            }
+                        }
                     }
                     setOnline(true, host);
                     backoff = 1;
@@ -424,8 +484,19 @@ public final class Mqtt {
                             break;      // 连接断了
                         }
                         idleTimeouts = 0;
-                        if (h[0] == 0x30 || h[0] == 0x3A || h[0] == 0x32) {
-                            String payload = parsePublish(body);
+                        if ((h[0] & 0xF0) == 0x30) {
+                            /*
+                             * PUBLISH：QoS = (首字节 >> 1) & 3。
+                             * QoS1 的 body 在 topic 后面还跟着 2 字节包号，
+                             * 必须回 PUBACK，否则 broker 会一直重投同一条；
+                             * 取 payload 时也要跳过这两个字节。
+                             */
+                            int qos = (h[0] >> 1) & 0x03;
+                            String payload = parsePublish(body, qos);
+                            if (qos > 0) {
+                                out.write(pubackPacket(pidOf(body)));
+                                out.flush();
+                            }
                             if (payload != null && listener != null) {
                                 listener.onMessage(payload);
                             }
@@ -454,20 +525,37 @@ public final class Mqtt {
         }
     }
 
-    /** 从 PUBLISH 的 body 里取出 payload（跳过 topic） */
-    private static String parsePublish(byte[] body) {
+    /** 从 PUBLISH 的 body 里取出 payload（跳过 topic，QoS>0 时再跳过 2 字节包号） */
+    private static String parsePublish(byte[] body, int qos) {
         try {
             if (body == null || body.length < 2) {
                 return null;
             }
             int tl = ((body[0] & 0xFF) << 8) | (body[1] & 0xFF);
-            int off = 2 + tl;
+            int off = 2 + tl + (qos > 0 ? 2 : 0);
             if (off > body.length) {
                 return null;
             }
             return new String(body, off, body.length - off, StandardCharsets.UTF_8);
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** 从 PUBLISH 的 body 里取出包号（QoS>0 才有） */
+    private static int pidOf(byte[] body) {
+        try {
+            if (body == null || body.length < 4) {
+                return 0;
+            }
+            int tl = ((body[0] & 0xFF) << 8) | (body[1] & 0xFF);
+            int off = 2 + tl;
+            if (off + 1 >= body.length) {
+                return 0;
+            }
+            return ((body[off] & 0xFF) << 8) | (body[off + 1] & 0xFF);
+        } catch (Exception e) {
+            return 0;
         }
     }
 
@@ -525,6 +613,11 @@ public final class Mqtt {
      *
      * 为什么不用长连接发：发完就走，最省电、最不容易被系统掐。
      * 收消息才需要长连接（Sub）。
+     *
+     * QoS1：写完 PUBLISH 之后必须等到 broker 的 PUBACK 才算成功。
+     * 以前是"写进 socket 就 return true"，网络半断（TCP 缓冲还吃得下）时
+     * 订单其实没到 broker，界面上却显示已经发出去了 —— 这是"明明在线却说不在线"
+     * 的另一半原因。
      */
     public static boolean publishOnce(String room, String payload, int timeoutMs) {
         Socket s = null;
@@ -537,17 +630,37 @@ public final class Mqtt {
             OutputStream out = s.getOutputStream();
             InputStream in = s.getInputStream();
 
-            out.write(connectPacket("xiaowo-p-" + Math.abs(rnd.nextLong() % 1000000000L)));
+            out.write(connectPacket("xiaowo-p-" + Math.abs(rnd.nextLong() % 1000000000L), true));
             out.flush();
             int[] h = new int[1];
             byte[] ack = readPacket(in, h);
             if (h[0] != 0x20 || ack == null || ack.length < 2 || ack[1] != 0) {
                 return false;
             }
-            out.write(publishPacket(topic(room), payload));
+            int pid = 1 + rnd.nextInt(60000);
+            out.write(publishPacket(pid, topic(room), payload, 1));
             out.flush();
-            // QoS0 没有确认包，写完就算发出去了
-            return true;
+
+            long deadline = System.currentTimeMillis() + Math.max(1200, timeoutMs);
+            while (System.currentTimeMillis() < deadline) {
+                int[] ph = new int[1];
+                byte[] b;
+                try {
+                    b = readPacket(in, ph);
+                } catch (java.net.SocketTimeoutException te) {
+                    return false;
+                }
+                if (b == null) {
+                    return false;
+                }
+                if (ph[0] == 0x40 && b.length >= 2) {
+                    int got = ((b[0] & 0xFF) << 8) | (b[1] & 0xFF);
+                    if (got == pid) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         } catch (Exception e) {
             return false;
         } finally {

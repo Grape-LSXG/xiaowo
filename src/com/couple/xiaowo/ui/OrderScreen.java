@@ -430,6 +430,13 @@ public class OrderScreen extends LinearLayout {
     }
 
     private void onChatIncoming(final Social.Msg m) {
+        // QoS1 是"至少一次"，broker 没收到 PUBACK 会重投：同 ts + 同文本已在列表里就跳过
+        for (int i = chatLog.size() - 1; i >= 0; i--) {
+            Social.Msg old = chatLog.get(i);
+            if (old.ts == m.ts && old.text != null && old.text.equals(m.text)) {
+                return;
+            }
+        }
         m.mine = false;
         chatLog.add(m);
         while (chatLog.size() > 200) {
