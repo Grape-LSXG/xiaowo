@@ -90,6 +90,8 @@ public final class Relay {
                 "relayFrom", Json.quote(sender),
                 "relayTs", String.valueOf(System.currentTimeMillis()),
                 "relayPayload", Json.quote(payload)));
+        // 发布也要用同一套服务器配置（自建时公共 broker 就完全不碰了）
+        Mqtt.configure(c);
         return Mqtt.publishOnce(room, wrapped, timeoutMs);
     }
 

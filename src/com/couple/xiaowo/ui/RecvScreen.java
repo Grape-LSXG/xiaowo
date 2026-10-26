@@ -2195,7 +2195,25 @@ public class RecvScreen extends LinearLayout {
                 touchClient(Json.str(m, "id", ""), Json.str(m, "name", ""),
                         Json.str(m, "host", ""), (int) Json.num(m, "port", 0));
             } else if (Protocol.TYPE_ORDER.equals(type)) {
-                onOrderArrived(Protocol.Order.fromJson(payload));
+                final Protocol.Order o = Protocol.Order.fromJson(payload);
+                onOrderArrived(o);
+                /*
+                 * 回执从中转回去。
+                 *
+                 * 直连那条路 HTTP 响应本身就是回执；走中转时 QoS0 没有任何确认，
+                 * 点单端只能"假装送到了"。回这一条，点单端才能把历史记成已送达，
+                 * 也让"我明明在线"这种事有据可查。
+                 *
+                 * 放在后台线程：publish 要建 TCP 连接，不能占 UI 线程。
+                 */
+                if (Relay.enabled(act) && o.id != null && o.id.length() > 0) {
+                    final String ackBody = Protocol.orderAck(o.id);
+                    new Thread(new Runnable() {
+                        public void run() {
+                            Relay.publish(act, Protocol.ROLE_RECV, ackBody, 6000);
+                        }
+                    }).start();
+                }
             } else if (Protocol.TYPE_CHAT.equals(type)) {
                 onChatIncoming(Social.Msg.fromJson(payload));
             } else if (Protocol.TYPE_MENU.equals(type)) {

@@ -116,6 +116,17 @@ public class OrderScreen extends LinearLayout {
     private Net.Server server;
 
     private List<History.Entry> history = new ArrayList<History.Entry>();
+
+    /**
+     * 经中转发出去、还在等接单端回执的订单：订单 id → 历史条目。
+     *
+     * MQTT 是 QoS0，publish 成功只说明 broker 收下了。以前直接在界面说
+     * "已经送到了"，对方其实可能在重连的空窗里 —— 用户看到的就是
+     * "我明明在线，对方却说没收到"。现在改成"等回执"，
+     * 等不到就老实说可能没送到。
+     */
+    private final java.util.Map<String, History.Entry> pendingAcks =
+            new java.util.LinkedHashMap<String, History.Entry>();
     private List<String> fridge = new ArrayList<String>();
     private Social.Notice notice;
     private final List<Social.Msg> chatLog = new ArrayList<Social.Msg>();
@@ -615,8 +626,10 @@ public class OrderScreen extends LinearLayout {
                 /*
                  * 最后一道兜底：异地中转。
                  * 前面几条都是"直连"，两个人不在同一网络时必然全失败，
-                 * 这时才走公共 MQTT 把订单送出去。
-                 * QoS0 没有回执，所以只要 publish 成功就认为已送达。
+                 * 这时才走 MQTT 把订单送出去。
+                 *
+                 * 注意 QoS0 只代表"broker 收下了"，不代表"张老师收到了"，
+                 * 所以这里不能直接说"已送达"——要等接单端回 orderAck。
                  */
                 if (resp == null && Relay.enabled(OrderScreen.this.act)) {
                     if (Relay.publish(act, Protocol.ROLE_ORDER, order.toJson(), 8000)) {
@@ -632,17 +645,25 @@ public class OrderScreen extends LinearLayout {
                     public void run() {
                         sending = false;
                         if (fResp != null) {
-                            peerHost = fUsed;
-                            peerPort = fPort;
-                            sp.edit().putString("peer_host", fUsed).putInt("peer_port", fPort).apply();
+                            // 走中转时不记地址：fUsed 是 "relay"，写进 peer_host
+                            // 会让下次启动拿它当 IP 去连（连不上还耽误时间）
+                            if (!"relay".equals(fUsed)) {
+                                peerHost = fUsed;
+                                peerPort = fPort;
+                                sp.edit().putString("peer_host", fUsed)
+                                        .putInt("peer_port", fPort).apply();
+                            }
                             if (peerView != null) {
                                 peerView.setText(peerText());
                             }
+                            boolean viaRelay = "relay".equals(fUsed);
                             History.Entry e = new History.Entry();
                             e.ts = order.ts;
                             e.total = order.total;
                             e.note = order.note;
-                            e.delivered = true;
+                            // 走中转时还不知道对方收没收到，先记"未确认"，
+                            // 等 orderAck 回来再改成已送达（见 handleOrderAck）
+                            e.delivered = !viaRelay;
                             e.lines.addAll(order.lines);
                             history.add(e);
                             saveHistory();
@@ -652,7 +673,13 @@ public class OrderScreen extends LinearLayout {
                             }
                             updateCart();
                             host.burst(18);
-                            toastLove("已经送到张老师那儿啦 ❤");
+                            if (viaRelay) {
+                                pendingAcks.put(order.id, e);
+                                toastLove("已经发给张老师了，等回执…");
+                                scheduleAckWatch(order.id);
+                            } else {
+                                toastLove("已经送到张老师那儿啦 ❤");
+                            }
                         } else {
                             updateCart();
                             toastWarn("没连上张老师，去「我 → 连接设置」填一下地址");
@@ -661,6 +688,43 @@ public class OrderScreen extends LinearLayout {
                 });
             }
         }).start();
+    }
+
+    /**
+     * 接单端回执到了：把这单改成"已送达"，并撤掉超时提醒。
+     *
+     * 这条是 v4.7 加的。之前异地中转下单是"发出即成功"，
+     * 对方在重连窗口里就丢了，用户只会看到"我明明在线"的对骂。
+     */
+    private void handleOrderAck(String orderId) {
+        if (orderId == null || orderId.length() == 0) {
+            return;
+        }
+        History.Entry e = pendingAcks.remove(orderId);
+        if (e == null) {
+            return;   // 已经确认过，或者不是我等的那一单
+        }
+        e.delivered = true;
+        saveHistory();
+        toastLove("张老师收到啦 ❤");
+    }
+
+    /**
+     * 发出去之后开始等回执。
+     *
+     * 15 秒还没等到就说实话，别让用户以为送到了。
+     * 不做自动重发：同一单重发两次容易被当成两单，让用户自己再点一次更可控。
+     */
+    private void scheduleAckWatch(final String orderId) {
+        sched.postDelayed(new Runnable() {
+            public void run() {
+                History.Entry e = pendingAcks.remove(orderId);
+                if (e == null) {
+                    return;
+                }
+                toastWarn("没等到张老师的回执，可能刚好没连上；再点一次下单试试");
+            }
+        }, 15000L);
     }
 
     private void showNoteDialog() {
@@ -838,7 +902,10 @@ public class OrderScreen extends LinearLayout {
      */
     public void onRelayMessage(String type, String payload) {
         try {
-            if (Protocol.TYPE_CHAT.equals(type)) {
+            if (Protocol.TYPE_ORDER_ACK.equals(type)) {
+                java.util.Map<String, Object> m = Json.asObject(Json.parse(payload));
+                handleOrderAck(Json.str(m, "id", ""));
+            } else if (Protocol.TYPE_CHAT.equals(type)) {
                 onChatIncoming(Social.Msg.fromJson(payload));
             } else if (Protocol.TYPE_MENU.equals(type)) {
                 // 接单端改了菜谱，经中转推过来（异地时的通路）

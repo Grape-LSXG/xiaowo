@@ -38,6 +38,15 @@ public class MainActivity extends Activity implements HeartHost {
     private FrameLayout root;
     /** 防止一次切换里被传感器的第二节回调重入 */
     private boolean themeSwapping = false;
+
+    /**
+     * 网络变化监听。
+     *
+     * 手机从 Wi-Fi 切到流量（或反过来）时，原来那条 MQTT 长连接其实已经死了，
+     * 但我们只能靠读超时才发现 —— 最多 35 秒的空窗，中间订单一律丢。
+     * 系统换了默认网络就主动重连，空窗缩到一两秒。
+     */
+    private android.net.ConnectivityManager.NetworkCallback netCb;
     private Theme.Ambient ambient;
 
     /**
@@ -141,6 +150,7 @@ public class MainActivity extends Activity implements HeartHost {
         }
         relayLastNote = "连接中…";
         startRelay();
+        watchNetworkChange();
         notifyRelayViews();
     }
 
@@ -149,6 +159,8 @@ public class MainActivity extends Activity implements HeartHost {
      * 只要配了房间码就常驻 —— 点单端和接单端都需要收（聊天/公告/爱心是双向的）。
      */
     private void startRelay() {
+        // 每次建连前刷一次自建服务器配置：用户改了地址不用重启 App
+        Mqtt.configure(this);
         final String room = Relay.room(this);
         if (room == null || !Relay.enabled(this)) {
             notifyRelayViews();
@@ -172,6 +184,35 @@ public class MainActivity extends Activity implements HeartHost {
         });
         relaySub.start();
         notifyRelayViews();
+    }
+
+    /**
+     * 监听默认网络切换：一换网就把中转订阅重连一次。
+     *
+     * 只在"当前没连上"时才重启，避免每次网络波动都白掐一条好连接。
+     */
+    private void watchNetworkChange() {
+        if (netCb != null) {
+            return;
+        }
+        try {
+            android.net.ConnectivityManager cm =
+                    (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm == null) {
+                return;
+            }
+            netCb = new android.net.ConnectivityManager.NetworkCallback() {
+                public void onAvailable(android.net.Network network) {
+                    if (relaySub != null && !relaySub.isOnline()) {
+                        restartRelay();
+                    }
+                }
+            };
+            cm.registerDefaultNetworkCallback(netCb);
+        } catch (Throwable ignore) {
+            // 老 ROM 上可能没有这个 API（http://developer.android.com 说 24 起才有），忽略即可
+            netCb = null;
+        }
     }
 
     /** 把中转收到的消息交给对应的界面处理 */
@@ -624,6 +665,17 @@ public class MainActivity extends Activity implements HeartHost {
             } catch (Exception ignore) {
             }
             relaySub = null;
+        }
+        if (netCb != null) {
+            try {
+                android.net.ConnectivityManager cm =
+                        (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    cm.unregisterNetworkCallback(netCb);
+                }
+            } catch (Throwable ignore) {
+            }
+            netCb = null;
         }
         relayStatusViews.clear();
         if (orderScreen != null) {

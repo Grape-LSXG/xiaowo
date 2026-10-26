@@ -38,6 +38,14 @@ public final class Protocol {
     public static final String TYPE_HERE = "here";
     /** 点单端 → 接单端：我还在线（多台点单端时用来数人数） */
     public static final String TYPE_PRESENCE = "presence";
+    /**
+     * 接单端 → 点单端：这单我收到了。
+     *
+     * 为什么需要它：点单端经中转下单时，MQTT 是 QoS0，发出去只代表"交给了 broker"，
+     * 不代表"对方收到了"。接单端收下后回这一条，点单端才能把"已送达"说真话；
+     * 等不到回执就提示"可能没送到"，而不是骗用户说送到了。
+     */
+    public static final String TYPE_ORDER_ACK = "orderAck";
     public static final String TYPE_SYNC = "sync";
     public static final String TYPE_SHOT = "shot";
     public static final String TYPE_SHOT_IMG = "shotImg";
@@ -282,6 +290,15 @@ public final class Protocol {
      * 带上自己的回信地址（host/port）是有意的：接单端要按"在线的那几台"
      * 逐个发消息，只靠"最近一单的 replyHost"在多台点单端时会漏人。
      */
+    /** 接单端收到订单后的回执（经中转回来的那一路） */
+    public static String orderAck(String orderId) {
+        return Json.object(Json.fields(
+                "type", Json.quote(TYPE_ORDER_ACK),
+                "role", Json.quote(ROLE_RECV),
+                "id", Json.quote(orderId),
+                "ts", String.valueOf(System.currentTimeMillis())));
+    }
+
     public static String presence(String id, String name, String host, int port) {
         return Json.object(Json.fields(
                 "type", Json.quote(TYPE_PRESENCE),

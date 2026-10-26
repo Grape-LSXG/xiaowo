@@ -1,5 +1,8 @@
 package com.couple.xiaowo.core;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -38,6 +41,136 @@ public final class Mqtt {
             "broker.emqx.io",
     };
     public static final int PORT = 1883;
+
+    // ------------------------------------------------------------ 自建服务器
+    /*
+     * v4.7 起可以不用公共 broker，改连自己搭的 mosquitto。
+     *
+     * 为什么：公共 broker 在国内经常连不上/被限速，而且 topic 是全公开的 ——
+     * 只要猜到房间码，任何人 `mosquitto_sub -t 'xiaowo/#'` 就能看到两个人的聊天。
+     * 自己一台服务器还能开账号密码、按房间做 ACL、并且只走一条稳定的连接。
+     *
+     * 配置存在 SharedPreferences("xiaowo") 里，由「连接设置 → 自建服务器」写入。
+     */
+    public static final String SP_HOST = "broker_host";
+    public static final String SP_PORT = "broker_port";
+    public static final String SP_USER = "broker_user";
+    public static final String SP_PASS = "broker_pass";
+    public static final String SP_TLS = "broker_tls";
+
+    private static String cfgHost;
+    private static int cfgPort = PORT;
+    private static String cfgUser;
+    private static String cfgPass;
+    private static boolean cfgTls;
+
+    /**
+     * 从 SP 读一次配置（静态字段）。
+     *
+     * 每次建连接前调一遍：用户改了地址不用重启 App，重连时就生效。
+     */
+    public static void configure(Context c) {
+        if (c == null) {
+            return;
+        }
+        try {
+            SharedPreferences sp = c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
+            String h = sp.getString(SP_HOST, "");
+            cfgHost = (h == null || h.trim().length() == 0) ? null : h.trim();
+            cfgPort = sp.getInt(SP_PORT, PORT);
+            if (cfgPort <= 0 || cfgPort > 65535) {
+                cfgPort = PORT;
+            }
+            String u = sp.getString(SP_USER, "");
+            cfgUser = (u == null || u.trim().length() == 0) ? null : u.trim();
+            String pw = sp.getString(SP_PASS, "");
+            cfgPass = (pw == null || pw.length() == 0) ? null : pw;
+            cfgTls = sp.getBoolean(SP_TLS, false);
+        } catch (Exception ignore) {
+        }
+    }
+
+    /** 保存自建服务器配置（空字符串表示清掉、回到公共 broker） */
+    public static void saveBroker(Context c, String host, int port,
+                                  String user, String pass, boolean tls) {
+        SharedPreferences sp = c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
+        sp.edit()
+                .putString(SP_HOST, host == null ? "" : host.trim())
+                .putInt(SP_PORT, port)
+                .putString(SP_USER, user == null ? "" : user.trim())
+                .putString(SP_PASS, pass == null ? "" : pass)
+                .putBoolean(SP_TLS, tls)
+                .apply();
+        configure(c);
+    }
+
+    public static String cfgHostText() {
+        return cfgHost == null ? "" : cfgHost;
+    }
+
+    public static int cfgPortValue() {
+        return cfgPort;
+    }
+
+    public static String cfgUserText() {
+        return cfgUser == null ? "" : cfgUser;
+    }
+
+    public static String cfgPassText() {
+        return cfgPass == null ? "" : cfgPass;
+    }
+
+    public static boolean cfgTlsValue() {
+        return cfgTls;
+    }
+
+    /** 是否配置了自建服务器（配了就不再碰公共 broker） */
+    public static boolean hasOwnBroker() {
+        return cfgHost != null && cfgHost.length() > 0;
+    }
+
+    /** 给 UI 显示用的一句话，比如 "47.98.1.2:1883" */
+    public static String endpointText() {
+        if (!hasOwnBroker()) {
+            return "公共 broker";
+        }
+        return cfgHost + ":" + cfgPort + (cfgTls ? " (TLS)" : "");
+    }
+
+    private static String hostFor(String room) {
+        return hasOwnBroker() ? cfgHost : brokerFor(room);
+    }
+
+    private static int portFor() {
+        return hasOwnBroker() ? cfgPort : PORT;
+    }
+
+    /**
+     * 建一条 TCP（或 TLS）连接。
+     *
+     * TLS 走系统信任库：服务器用 Let's Encrypt 证书就直接能用；
+     * 自签证书则必须在手机上装一次该证书，否则会被拒绝 ——
+     * 这是有意的，不然"跳过校验"等于没有加密。
+     */
+    private static Socket open(String host, int port, int timeoutMs) throws Exception {
+        if (!cfgTls) {
+            Socket s = new Socket();
+            s.connect(new InetSocketAddress(host, port), timeoutMs);
+            return s;
+        }
+        Socket plain = new Socket();
+        plain.connect(new InetSocketAddress(host, port), timeoutMs);
+        javax.net.ssl.SSLSocketFactory f =
+                (javax.net.ssl.SSLSocketFactory) javax.net.ssl.SSLSocketFactory.getDefault();
+        javax.net.ssl.SSLSocket ssl =
+                (javax.net.ssl.SSLSocket) f.createSocket(plain, host, port, true);
+        ssl.setUseClientMode(true);
+        javax.net.ssl.SSLParameters prm = ssl.getSSLParameters();
+        prm.setEndpointIdentificationAlgorithm("HTTPS");
+        ssl.setSSLParameters(prm);
+        ssl.startHandshake();
+        return ssl;
+    }
 
     private static final String TOPIC_PREFIX = "xiaowo/";
 
@@ -90,10 +223,30 @@ public final class Mqtt {
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         writeAll(body, utf8("MQTT"));
         body.write(4);        // 协议级别 4 = 3.1.1
-        body.write(0x02);     // clean session
+
+        /*
+         * connect flags：
+         *   bit1 clean session —— 保持 1（我们没有本地离线队列，
+         *     换 persistent session 还得处理重投递，收益不抵复杂度）
+         *   bit7 username、bit6 password —— 自建服务器要鉴权时置位
+         */
+        int flags = 0x02;
+        if (cfgUser != null) {
+            flags |= 0x80;
+        }
+        if (cfgPass != null) {
+            flags |= 0x40;
+        }
+        body.write(flags);
         body.write(0);        // keepalive 高位
         body.write(60);       // keepalive 60s
         writeAll(body, utf8(clientId));
+        if (cfgUser != null) {
+            writeAll(body, utf8(cfgUser));
+        }
+        if (cfgPass != null) {
+            writeAll(body, utf8(cfgPass));
+        }
         return frame(0x10, body.toByteArray());
     }
 
@@ -198,14 +351,18 @@ public final class Mqtt {
         }
 
         private void loop() {
-            int backoff = 2;
+            int backoff = 1;
             while (!stop) {
                 Socket s = null;
                 try {
-                    String host = brokerFor(room);
-                    s = new Socket();
-                    s.connect(new InetSocketAddress(host, PORT), 8000);
-                    s.setSoTimeout(90000);
+                    String host = hostFor(room);
+                    int port = portFor();
+                    s = open(host, port, 8000);
+                    /*
+                     * 35 秒：keepalive 声明的是 60 秒，留一半余量。
+                     * 超时不是"断线"，而是"该 ping 了"——见下面的读循环。
+                     */
+                    s.setSoTimeout(35000);
                     socket = s;
                     OutputStream out = s.getOutputStream();
                     InputStream in = s.getInputStream();
@@ -233,15 +390,40 @@ public final class Mqtt {
                         throw new Exception("SUBACK 失败");
                     }
                     setOnline(true, host);
-                    backoff = 2;
+                    backoff = 1;
 
-                    // 读循环：PUBLISH 交出去，PINGRESP 忽略
+                    /*
+                     * 读循环：PUBLISH 交出去，PINGRESP 只用来清心跳计数。
+                     *
+                     * v4.7 修：原来这里**从不发 PINGREQ**（pingPacket() 写了却没人调）。
+                     * 结果 broker 按 keepalive=60 在 90 秒内收不到客户端的包就断掉，
+                     * 而我们这边要等 soTimeout 到期才发现 —— 每条"长连接"其实只能活
+                     * 60~90 秒，然后退避 2 秒重连。那 2 秒的空窗里发来的消息（QoS0、
+                     * clean session）直接消失，表现就是"偶尔丢单""明明在线却说不在线"。
+                     *
+                     * 现在：空闲 35 秒就主动发 PINGREQ（keepalive 60 的一半多一点），
+                     * 收到 PINGRESP 计数清零；连续两次窗口都没回应就判定断线重连。
+                     * 这样连接才能真正长期挂着。
+                     */
+                    int idleTimeouts = 0;
                     while (!stop) {
                         int[] h = new int[1];
-                        byte[] body = readPacket(in, h);
+                        byte[] body;
+                        try {
+                            body = readPacket(in, h);
+                        } catch (java.net.SocketTimeoutException te) {
+                            if (idleTimeouts >= 2) {
+                                throw new Exception("心跳无响应，判定断线");
+                            }
+                            out.write(pingPacket());
+                            out.flush();
+                            idleTimeouts++;
+                            continue;
+                        }
                         if (body == null) {
                             break;      // 连接断了
                         }
+                        idleTimeouts = 0;
                         if (h[0] == 0x30 || h[0] == 0x3A || h[0] == 0x32) {
                             String payload = parsePublish(body);
                             if (payload != null && listener != null) {
@@ -265,7 +447,9 @@ public final class Mqtt {
                 } catch (InterruptedException e) {
                     break;
                 }
-                backoff = Math.min(backoff * 2, 30);
+                // 上限 8 秒：原来 30 秒意味着一次网络抖动可能丢十几条消息，
+                // 而我们这套协议没有离线补发，只能靠"尽快连回来"。
+                backoff = Math.min(backoff * 2, 8);
             }
         }
     }
@@ -346,9 +530,9 @@ public final class Mqtt {
         Socket s = null;
         try {
             Random rnd = new Random();
-            String host = brokerFor(room);
-            s = new Socket();
-            s.connect(new InetSocketAddress(host, PORT), Math.min(timeoutMs, 8000));
+            String host = hostFor(room);
+            int port = portFor();
+            s = open(host, port, Math.min(timeoutMs, 8000));
             s.setSoTimeout(timeoutMs);
             OutputStream out = s.getOutputStream();
             InputStream in = s.getInputStream();

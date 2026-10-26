@@ -330,6 +330,18 @@ apt-get install -y openjdk-17-jdk-headless aapt zipalign
 **Q：切深色模式为什么不再闪一下？**
 v4.6 起不再 `recreate()`，改成同窗口内重建一屏 + 旧画面淡出，见 `docs/dark-mode.md`。
 
+**Q：异地老是断线 / 说对方不在线？**
+v4.7 修了两个硬伤：订阅连接原来**从不发心跳**，被 broker 每 90 秒掐一次、
+每次重连有 2~4 秒空窗（消息全丢）；走中转的订单原来"发出即算送达"。
+现在空闲 35 秒发 PINGREQ、换网立刻重连、订单等接单端回执。
+还想更稳就自建一台 mosquitto，见 `docs/self-host-relay.md`；
+不想花钱的免费方案见 `docs/free-mqtt.md`。
+
+**Q：不想用公共 broker 了？**
+「我 → 连接设置 → 异地中转 → 自建服务器」可以填任意 MQTT 服务器
+（地址/端口/账号/密码/TLS）。自己搭一台 2 核 2G 的小服务器就够，
+完整命令在 `docs/self-host-relay.md`。
+
 ---
 
 ## 五、空间回收

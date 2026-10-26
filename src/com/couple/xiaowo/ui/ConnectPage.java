@@ -390,6 +390,26 @@ public final class ConnectPage {
         }
         card.addView(row, top(act, 10));
 
+        /*
+         * 服务器一行。
+         *
+         * 公共 broker 在国内不稳（还明文），所以给个入口换成自己搭的。
+         * 换了要立刻重连，否则要等下一次断线才会用上新地址。
+         */
+        Mqtt.configure(act);
+        final TextView srv = Ui.tv(act, "服务器：" + Mqtt.endpointText()
+                + (Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"),
+                10, Mqtt.hasOwnBroker() ? Ui.SUCCESS : Ui.TEXT_MUTED, false);
+        card.addView(srv, top(act, 6));
+        TextView selfHost = Ui.pill(act, Mqtt.hasOwnBroker() ? "改自建服务器" : "自建服务器",
+                Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 11, 12, 8, true);
+        selfHost.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                promptBroker(act, rebuild, onChanged, srv);
+            }
+        });
+        card.addView(selfHost, top(act, 8));
+
         // 中转的"在线"是真实维护的，直接读
         if (has) {
             TextView live = Ui.tv(act, "中转状态：正在连接…", 10, Ui.TEXT_MUTED, false);
@@ -399,6 +419,113 @@ public final class ConnectPage {
             }
         }
         return card;
+    }
+
+    /**
+     * 「自建服务器」设置。
+     *
+     * 四个字段 + 一个 TLS 开关。留空地址 = 回到公共 broker。
+     * 保存后立刻 restartRelay()，不然旧连接还挂在老地址上。
+     */
+    private static void promptBroker(final Activity act, final Runnable rebuild,
+                                     final Runnable onChanged, final TextView label) {
+        Mqtt.configure(act);
+        LinearLayout box = Ui.vertical(act);
+        box.setPadding(Ui.dpi(act, 4), Ui.dpi(act, 2), Ui.dpi(act, 4), Ui.dpi(act, 2));
+
+        box.addView(Ui.tv(act, "自己搭的 mosquitto（阿里云/腾讯云都行）。留空表示继续用公共 broker。",
+                10.5f, Ui.TEXT_SUB, false));
+
+        final EditText host = field(act, "地址，如 47.98.1.2", Mqtt.cfgHostText());
+        box.addView(labelOf(act, "服务器地址"), top(act, 10));
+        box.addView(host, top(act, 4));
+
+        final EditText port = field(act, "端口，默认 1883",
+                String.valueOf(Mqtt.cfgPortValue()));
+        port.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        box.addView(labelOf(act, "端口"), top(act, 10));
+        box.addView(port, top(act, 4));
+
+        final EditText user = field(act, "用户名（没开鉴权就留空）", Mqtt.cfgUserText());
+        box.addView(labelOf(act, "用户名"), top(act, 10));
+        box.addView(user, top(act, 4));
+
+        final EditText pass = field(act, "密码", Mqtt.cfgPassText());
+        box.addView(labelOf(act, "密码"), top(act, 10));
+        box.addView(pass, top(act, 4));
+
+        final boolean[] tls = new boolean[]{Mqtt.cfgTlsValue()};
+        final TextView tlsBtn = Ui.pill(act,
+                tls[0] ? "TLS：开（8883）" : "TLS：关", Ui.PRIMARY_SOFT,
+                Ui.PRIMARY_DEEP, 11.5f, 14, 8, true);
+        tlsBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                tls[0] = !tls[0];
+                tlsBtn.setText(tls[0] ? "TLS：开（8883）" : "TLS：关");
+            }
+        });
+        box.addView(tlsBtn, top(act, 12));
+        box.addView(Ui.tv(act, tls[0]
+                        ? "证书必须被系统信任（Let's Encrypt 即可；自签要先在手机里装一次）。"
+                        : "不开 TLS 时账号密码是明文传的，只建议在家里/自己网络里用。",
+                9.5f, Ui.TEXT_MUTED, false), top(act, 6));
+
+        DialogKit.custom(act, "自建服务器", box, "保存", new Runnable() {
+            public void run() {
+                String h = host.getText() == null ? "" : host.getText().toString().trim();
+                int p;
+                try {
+                    p = Integer.parseInt(port.getText() == null ? ""
+                            : port.getText().toString().trim());
+                } catch (Exception e) {
+                    p = 1883;
+                }
+                if (p <= 0 || p > 65535) {
+                    p = 1883;
+                }
+                String u = user.getText() == null ? "" : user.getText().toString().trim();
+                String pw = pass.getText() == null ? "" : pass.getText().toString();
+                Mqtt.saveBroker(act, h, p, u, pw, tls[0]);
+                if (label != null) {
+                    label.setText("服务器：" + Mqtt.endpointText()
+                            + (Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"));
+                    label.setTextColor(Theme.adapt(
+                            Mqtt.hasOwnBroker() ? Ui.SUCCESS : Ui.TEXT_MUTED));
+                }
+                if (act instanceof MainActivity) {
+                    ((MainActivity) act).restartRelay();
+                }
+                if (rebuild != null) {
+                    rebuild.run();
+                }
+                if (onChanged != null) {
+                    onChanged.run();
+                }
+                Toast2.ok(act, h.length() == 0
+                        ? "已切回公共 broker" : "已保存，正在连 " + h);
+            }
+        });
+    }
+
+    private static TextView labelOf(Activity act, String text) {
+        return Ui.tv(act, text, 10.5f, Ui.TEXT_MUTED, false);
+    }
+
+    private static EditText field(Activity act, String hint, String prefill) {
+        EditText et = new EditText(act);
+        et.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
+        et.setTextColor(Theme.adapt(Ui.TEXT));
+        et.setHintTextColor(Ui.TEXT_MUTED);
+        et.setHint(hint);
+        if (prefill != null && prefill.length() > 0) {
+            et.setText(prefill);
+            et.setSelection(et.getText().length());
+        }
+        et.setSingleLine(true);
+        et.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 11), Ui.dpi(act, 14), Ui.dpi(act, 11));
+        et.setBackground(Ui.round(Ui.BG, Ui.dp(act, 12f),
+                Math.max(1, Ui.dpi(act, 0.8f)), Ui.LINE));
+        return et;
     }
 
     private static void promptRoom(final Activity act, final Runnable rebuild,
