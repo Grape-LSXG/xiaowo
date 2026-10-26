@@ -1,12 +1,10 @@
 package com.couple.xiaowo.ui;
 
 import android.app.Activity;
-import android.text.method.ScrollingMovementMethod;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.couple.xiaowo.core.Logs;
@@ -43,16 +41,12 @@ public final class LogPage {
             TextView body = Ui.tv(act, join(lines), 10.5f, Ui.TEXT_SUB, false);
             body.setTextIsSelectable(true);
             body.setTypeface(android.graphics.Typeface.MONOSPACE);
-            body.setMovementMethod(new ScrollingMovementMethod());
             body.setLineSpacing(0f, 1.25f);
             body.setPadding(Ui.dpi(act, 10), Ui.dpi(act, 10), Ui.dpi(act, 10), Ui.dpi(act, 10));
             body.setBackground(Ui.round(0xFFF7F5FA, Ui.dp(act, 10)));
-
-            ScrollView scroll = new ScrollView(act);
-            scroll.addView(body, new ScrollView.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            box.addView(scroll, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 360)));
+            // 面板本身就能滚（DialogKit.sheet 里是 MaxHeightScroll），
+            // 这里再套一层 ScrollView 会出现"两层都要滚"的手感灾难
+            box.addView(body);
         }
 
         // ---- 底部操作 ----
