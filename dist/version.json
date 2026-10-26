@@ -1,14 +1,14 @@
 {
   "order": {
-    "versionCode": 50,
-    "versionName": "4.11",
+    "versionCode": 51,
+    "versionName": "4.12",
     "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-order.apk",
-    "notes": "v4.11：聊天可以选发给哪一台设备（多台点单端时），看屏幕/震动也能点名；聊天输入框展开后是长条，不再被挤成胶囊；菜谱没变化不再提示；专业模式新增运行日志（可复制发我排查）"
+    "notes": "v4.12：修更新拿错包的问题（接单端以前会下到点单端的安装包）；安装前会校验包名，拿错就删掉并说清楚；点单端也能从同一批 release 里找到自己的包"
   },
   "recv": {
-    "versionCode": 50,
-    "versionName": "4.11",
+    "versionCode": 51,
+    "versionName": "4.12",
     "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-recv.apk",
-    "notes": "v4.11：聊天可以选发给哪一台设备（多台点单端时），看屏幕/震动也能点名；聊天输入框展开后是长条，不再被挤成胶囊；菜谱没变化不再提示；专业模式新增运行日志（可复制发我排查）"
+    "notes": "v4.12：修更新拿错包的问题（接单端以前会下到点单端的安装包）；安装前会校验包名，拿错就删掉并说清楚；点单端也能从同一批 release 里找到自己的包"
   }
 }

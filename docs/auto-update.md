@@ -480,3 +480,25 @@ bash tools/publish.sh --help
 - 入口：点单端「我 → 📥 从张老师那儿接收」；网页清单查不到时会自动改走这条路。
 - 前提：两端在同一条中转通道上（小窝云 / 房间码 / 自建服务器都行）。
 
+
+## 11. v4.12：修「接单端下成了点单端的包」
+
+现象：4.9 → 4.10 时，接单端点更新，下载到的却是点单端的安装包，系统安装器只回一句「软件包无效」。
+
+原因有两层：
+
+1. `core/GithubRelease.java` 在一个 release 里**取第一个 `.apk` 资产就用**。而 `recv-v*` 的 release 里同时塞了
+   `xiaowo-order.apk` 和 `xiaowo-recv.apk`（接单端要内置点单端的包），上传顺序决定拿到哪个 —— 这次正好是 order。
+2. 只认自己角色的 tag 前缀（`recv-v*` / `order-v*`），而我们从来没发过 `order-v*`，点单端那条路等于死路。
+
+改法：
+
+| 位置 | 改动 |
+| --- | --- |
+| `GithubRelease.check` | 资产按名字挑：接单端认 `recv`、点单端认 `order`；都不匹配才退回第一个 apk（兼容老 release） |
+| `GithubRelease.check` | 另一端前缀的 tag 也接受，同版本时优先自己那一端 |
+| `Updater.install` | 新增 `wrongPackage(c, apk, needNewer)`：读 APK 的真实包名，和自己包名不符就**删掉并说明**（「下载到的是另一端（com.couple.xiaowo.order）的安装包」），不再交给系统去报"软件包无效" |
+
+发 release 的约定（重要）：**先传 `xiaowo-recv.apk`，再传 `xiaowo-order.apk`**。
+老版本（≤4.11）只会取第一个 apk，先传 recv 才能让旧接单端也拿到对的包。
+

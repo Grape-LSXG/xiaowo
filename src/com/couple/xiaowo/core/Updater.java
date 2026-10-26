@@ -446,6 +446,21 @@ public final class Updater {
             }
             return "安装包已损坏，已删除，请重新下载";
         }
+        /*
+         * 第二道闸：这个包到底是哪个 App 的？
+         *
+         * 之前接单端从 release 里下到了点单端的包（一个 release 塞两个 apk，
+         * 老代码拿第一个就走），系统安装器只会回一句"软件包无效"，
+         * 完全看不出原因。这里直接读包名比对，错了就删掉并说清楚。
+         */
+        String wrong = wrongPackage(c, apk, true);
+        if (wrong != null) {
+            try {
+                apk.delete();
+            } catch (Exception ignore) {
+            }
+            return wrong;
+        }
         try {
             Intent i = new Intent(Intent.ACTION_VIEW);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -472,6 +487,38 @@ public final class Updater {
             return ApkFileProvider.uriFor(c, apk);
         } catch (Throwable e) {
             return Uri.fromFile(apk);
+        }
+    }
+
+    /**
+     * 读 APK 的包名/版本号，判断"这是不是我这个 App 的包"。
+     *
+     * @param needNewer true 时还要求 versionCode 不比当前旧（防止把旧包推给自己）
+     * @return null 表示没问题；否则是可以直接给用户看的错误文案
+     */
+    public static String wrongPackage(Context c, File apk, boolean needNewer) {
+        try {
+            android.content.pm.PackageManager pm = c.getPackageManager();
+            android.content.pm.PackageInfo pi =
+                    pm.getPackageArchiveInfo(apk.getAbsolutePath(), 0);
+            if (pi == null) {
+                return "安装包读不出来（可能下载不完整），已删除，请重新下载";
+            }
+            String mine = c.getPackageName();
+            if (pi.packageName == null || !pi.packageName.equals(mine)) {
+                String who = pi.packageName == null ? "未知" : pi.packageName;
+                boolean other = who.endsWith(".order") || who.endsWith(".recv");
+                return other
+                        ? "下载到的是另一端（" + who + "）的安装包，已删除；请在那边更新"
+                        : "下载到的不是小窝的安装包（" + who + "），已删除";
+            }
+            if (needNewer && pi.versionCode < currentVersionCode(c)) {
+                return "这个是旧版本（" + pi.versionCode + "），已删除";
+            }
+            return null;
+        } catch (Exception e) {
+            // 读不出来就交给系统安装器判断，别把人卡死在这里
+            return null;
         }
     }
 

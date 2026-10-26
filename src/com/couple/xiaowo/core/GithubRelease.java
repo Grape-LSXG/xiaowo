@@ -122,11 +122,21 @@ public final class GithubRelease {
                     }
                     java.util.List<?> list = (java.util.List<?>) arr;
                     Release best = null;
+                    boolean bestOwn = false;
                     String wantPrefix = wantRecv ? "recv" : "order";
+                    String altPrefix = wantRecv ? "order" : "recv";
                     for (Object o : list) {
                         Map<String, Object> rel = Json.asObject(o);
                         String tag = Json.str(rel, "tag_name", "");
-                        if (!tag.startsWith(wantPrefix)) {
+                        /*
+                         * 两端的 tag 前缀不同，但**另一端发版时也会把这个包一起传上来**
+                         * （接单端的 release 里一直塞着点单端的 apk）。
+                         * 只认自己的前缀会出现"点单端根本没发过 order-v*，
+                         * 于是永远检测不到更新"，所以另一端的前缀也收进来，
+                         * 具体下哪个包再按资产名字挑（见下面 wantAsset 那段）。
+                         */
+                        boolean own = tag.startsWith(wantPrefix);
+                        if (!own && !tag.startsWith(altPrefix)) {
                             continue;
                         }
                         int vc = versionFromTag(tag);
@@ -138,24 +148,56 @@ public final class GithubRelease {
                         String assetUrl = null;
                         String assetDown = null;
                         long size = 0;
+                        /*
+                         * 一个 release 里可能有两个包（接单端 + 它内置的点单端）。
+                         * 以前是「拿第一个 .apk 就走」，结果接单端去下了点单端的包，
+                         * 安装器当然装不上（或装成另一个 App）。
+                         *
+                         * 现在按名字挑：接单端认 recv，点单端认 order；
+                         * 都不匹配才退回"第一个 apk"，保证老 release 仍能更新。
+                         */
                         Object assetsObj = rel.get("assets");
                         if (assetsObj instanceof java.util.List) {
+                            String wantAsset = wantRecv ? "recv" : "order";
+                            String fallbackName = null;
+                            String fallbackUrl = null;
+                            String fallbackDown = null;
+                            long fallbackSize = 0;
                             for (Object a : (java.util.List<?>) assetsObj) {
                                 Map<String, Object> am = Json.asObject(a);
                                 String name = Json.str(am, "name", "");
-                                if (name.endsWith(".apk")) {
+                                if (!name.endsWith(".apk")) {
+                                    continue;
+                                }
+                                String url = Json.str(am, "url", "");
+                                String down = Json.str(am, "browser_download_url", "");
+                                long sz = Json.num(am, "size", 0);
+                                if (name.toLowerCase().contains(wantAsset)) {
                                     assetName = name;
-                                    assetUrl = Json.str(am, "url", "");
-                                    assetDown = Json.str(am, "browser_download_url", "");
-                                    size = Json.num(am, "size", 0);
+                                    assetUrl = url;
+                                    assetDown = down;
+                                    size = sz;
                                     break;
                                 }
+                                if (fallbackName == null) {
+                                    fallbackName = name;
+                                    fallbackUrl = url;
+                                    fallbackDown = down;
+                                    fallbackSize = sz;
+                                }
+                            }
+                            if (assetName == null && fallbackName != null) {
+                                assetName = fallbackName;
+                                assetUrl = fallbackUrl;
+                                assetDown = fallbackDown;
+                                size = fallbackSize;
                             }
                         }
                         if (assetUrl == null || assetUrl.length() == 0) {
                             continue;
                         }
-                        if (best == null || vc > best.versionCode) {
+                        if (best == null || vc > best.versionCode
+                                || (vc == best.versionCode && own && !bestOwn)) {
                             best = new Release();
                             best.versionCode = vc;
                             /*
@@ -175,6 +217,7 @@ public final class GithubRelease {
                             best.assetApiUrl = assetUrl;
                             best.assetDownUrl = assetDown;
                             best.size = size;
+                            bestOwn = own;
                         }
                     }
                     int mine = currentVersionCode(c);
