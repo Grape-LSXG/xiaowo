@@ -194,9 +194,16 @@ public final class Updater {
                     i.size = (long) Json.num(m, "size", 0);
                     if (i.versionCode > currentVersionCode(c) && i.url.length() > 0) {
                         info = i;
+                        lastErr = null;
+                        break;
                     }
+                    /*
+                     * 这一份镜像说"没有新版"，别急着收工：
+                     * jsDelivr 有缓存，更新后经常还返回上一版。
+                     * 继续试下一个镜像，只要有任何一份说更新就直接用它。
+                     */
                     lastErr = null;
-                    break;
+                    continue;
                 } catch (Exception e) {
                     lastErr = e.getMessage() == null ? "网络不通" : e.getMessage();
                 }
