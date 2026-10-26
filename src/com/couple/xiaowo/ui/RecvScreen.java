@@ -2761,6 +2761,19 @@ public class RecvScreen extends LinearLayout {
         synchronized (orderClients) {
             list.addAll(orderClients.values());
         }
+        // 选中的聊天对象掉线了就回到「全部」，不然消息会静静发不出去
+        if (chatTarget != null && chatTarget.length() > 0) {
+            boolean alive = false;
+            for (PeerClient c : list) {
+                if (chatTarget.equals(c.id)) {
+                    alive = true;
+                    break;
+                }
+            }
+            if (!alive) {
+                chatTarget = "";
+            }
+        }
         if (list.isEmpty()) {
             clientsText.setText("📱 已连接设备：0 台");
             clientsText.setTextColor(Theme.adapt(Ui.TEXT_MUTED));
