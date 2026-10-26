@@ -2,13 +2,13 @@
   "order": {
     "versionCode": 51,
     "versionName": "4.12",
-    "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-order.apk",
+    "url": "https://github.com/Grape-LSXG/xiaowo/releases/download/recv-v51/xiaowo-order.apk",
     "notes": "v4.12：修更新拿错包的问题（接单端以前会下到点单端的安装包）；安装前会校验包名，拿错就删掉并说清楚；点单端也能从同一批 release 里找到自己的包"
   },
   "recv": {
     "versionCode": 51,
     "versionName": "4.12",
-    "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-recv.apk",
+    "url": "https://github.com/Grape-LSXG/xiaowo/releases/download/recv-v51/xiaowo-recv.apk",
     "notes": "v4.12：修更新拿错包的问题（接单端以前会下到点单端的安装包）；安装前会校验包名，拿错就删掉并说清楚；点单端也能从同一批 release 里找到自己的包"
   }
 }
