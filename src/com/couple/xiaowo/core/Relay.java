@@ -52,12 +52,14 @@ public final class Relay {
         if (MODE_CLOUD.equals(m) || MODE_PUBLIC.equals(m) || MODE_SELF.equals(m)) {
             return m;
         }
-        // 没选过：预置了云端就是云，否则看有没有手填的服务器
+        // 没选过：预置了云端就是云（老用户升级上来不该断），
+        // 否则看有没有手填过的服务器，都没有就是公共房间
         Cloud.load(c);
         if (Cloud.has()) {
             return MODE_CLOUD;
         }
-        if (Mqtt.hasOwnBroker()) {
+        String h = sp(c).getString(Mqtt.SP_HOST, "");
+        if (h != null && h.trim().length() > 0) {
             return MODE_SELF;
         }
         return MODE_PUBLIC;
