@@ -53,8 +53,13 @@ public final class Updater {
      * 现在按顺序试，谁先通就用谁；全都试不通才报错。
      */
     public static final String[] MIRRORS = new String[]{
+            // 1) 发版时挂在 release 上的清单 —— 不经过 CDN，改完立刻生效
+            "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/version.json",
+            // 2) jsDelivr：国内多半能通，但**有缓存**（刚发版可能还返回上一版）
             "https://cdn.jsdelivr.net/gh/Grape-LSXG/xiaowo@main/dist/version.json",
+            // 3) GitHub 原始文件：最准，但国内经常连不上
             "https://raw.githubusercontent.com/Grape-LSXG/xiaowo/main/dist/version.json",
+            // 4) 老仓库（早期版本用的地方），留着当兜底
             "https://gitee.com/Quriosity233/love/raw/master/version.json",
     };
 
