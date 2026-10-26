@@ -199,3 +199,25 @@ senders:  局域网直连 → Tailscale → 中转（按顺序尝试）
 | 中转在线状态 | `在线（broker.emqx.io）` ✅ |
 | 中转查版本 | `versionCode=17 versionName=2.6` ✅ |
 | 协议回归测试 | 17/17 ✅ |
+
+---
+
+## 7. v4.10 起：房间码和服务器分成两种方式
+
+以前的界面只有「异地中转」一栏，写着"房间码"，可真正连的是 APK 里预置的 EMQX 服务器 ——
+用户填了房间码以为在用它，实际根本没参与。现在 `Relay.KEY_MODE` 只有一个值决定一切，
+界面选哪种就只显示哪种：
+
+| 模式 | 数据 | 界面 |
+| --- | --- | --- |
+| `cloud` ☁️ 小窝云 | `assets/cloud.properties` 的 host/user/pass/8883 + 预置房间码 | 不显示房间码，只说"已启用" |
+| `public` 📻 房间码 | 公共 broker（按房间哈希轮换）+ 用户自己编的 6 位码 | 显示房间码 + 复制/生成 |
+| `self` 🖥 自建服务器 | 用户填的 host/port/账号/TLS + 房间码 | 显示地址 + 房间码 |
+
+- 实现：[`Relay.mode()/setMode()`](../src/com/couple/xiaowo/core/Relay.java)、
+  [`Mqtt.configure()`](../src/com/couple/xiaowo/core/Mqtt.java)（按模式装载 host/账号/TLS）、
+  [`ConnectPage.relayCard()`](../src/com/couple/xiaowo/ui/ConnectPage.java)（三选一 + 该模式的操作按钮）、
+  [`MainActivity.relayStatusText()`](../src/com/couple/xiaowo/ui/MainActivity.java)（首页那行按模式说话）。
+- 手动填房间码 / 保存自建服务器会自动切到对应模式，避免"界面上是房间码、底层却是云"。
+- 首页状态行只读订阅真实状态（连上才写"在线"），不再是"存过房间码就算配对"。
+

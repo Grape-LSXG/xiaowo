@@ -1,14 +1,14 @@
 {
   "order": {
-    "versionCode": 48,
-    "versionName": "4.9",
-    "url": "https://Grape-LSXG.github.io/xiaowo/xiaowo/xiaowo-order.apk",
-    "notes": "版本 v4.9 大幅优化消息稳定性：改用自建 EMQX 云端中转（TLS 加密）、心跳保活 + QoS1 会话保持，异地收单不再漏、不再假「已送达」；接单端新增已连设备列表（机型 + 识别码）"
+    "versionCode": 49,
+    "versionName": "4.10",
+    "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-order.apk",
+    "notes": "v4.10：把「房间码」和「服务器」拆成两种连接方式（小窝云 / 房间码 / 自建服务器），首页状态按实际通道显示；更新通道改成 MQTT 分块直传（连不上 GitHub 也能从接单端拿包）；公告、爱心、安装回执全部补上中转兜底；多台点单端可点名截图/震动，聊天显示来源设备；新增专业模式（默认简洁文案）；回到前台自动重连，弱网重传更稳"
   },
   "recv": {
-    "versionCode": 48,
-    "versionName": "4.9",
-    "url": "https://Grape-LSXG.github.io/xiaowo/xiaowo/xiaowo-recv.apk",
-    "notes": "版本 v4.9 大幅优化消息稳定性：改用自建 EMQX 云端中转（TLS 加密）、心跳保活 + QoS1 会话保持，异地收单不再漏、不再假「已送达」；接单端新增已连设备列表（机型 + 识别码）"
+    "versionCode": 49,
+    "versionName": "4.10",
+    "url": "https://github.com/Grape-LSXG/xiaowo/releases/latest/download/xiaowo-recv.apk",
+    "notes": "v4.10：把「房间码」和「服务器」拆成两种连接方式（小窝云 / 房间码 / 自建服务器），首页状态按实际通道显示；更新通道改成 MQTT 分块直传（连不上 GitHub 也能从接单端拿包）；公告、爱心、安装回执全部补上中转兜底；多台点单端可点名截图/震动，聊天显示来源设备；新增专业模式（默认简洁文案）；回到前台自动重连，弱网重传更稳"
   }
 }

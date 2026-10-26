@@ -26,6 +26,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.couple.xiaowo.core.ApkMqtt;
 import com.couple.xiaowo.core.ApkRelay;
 import com.couple.xiaowo.core.History;
 import com.couple.xiaowo.core.Json;
@@ -448,8 +449,10 @@ public class RecvScreen extends LinearLayout {
         clientsBox = Ui.vertical(act);
         card.addView(clientsBox, top(2));
 
-        TextView hint = Ui.tv(act, "同一个 Wi-Fi：猫猫留空就能自动找到你\n"
-                        + "异地：让猫猫连同一个 Tailscale 账号，填上面的地址",
+        TextView hint = Ui.tv(act, Ui.pick(act,
+                        "在一起会自动连上；不在一起就点下面「连接方式」配一次。",
+                        "同一个 Wi-Fi：猫猫留空就能自动找到你\n"
+                                + "异地：让猫猫连同一个 Tailscale 账号，填上面的地址"),
                 10.5f, Ui.SUB, false);
         card.addView(hint, top(6));
 
@@ -708,7 +711,7 @@ public class RecvScreen extends LinearLayout {
     private View buildManagePage() {
         LinearLayout page = Ui.vertical(act);
         page.setBackgroundColor(Theme.adapt(Ui.BG));
-        page.addView(buildSubHeader("管理", "服务状态与端口"), wrap());
+        page.addView(buildSubHeader("管理", Ui.pick(act, "服务状态", "服务状态与端口")), wrap());
 
         ScrollView scroll = new ScrollView(act);
         scroll.setVerticalScrollBarEnabled(false);
@@ -718,7 +721,8 @@ public class RecvScreen extends LinearLayout {
         LinearLayout card = Ui.vertical(act);
         card.setBackground(Ui.round(Ui.CARD, dp(18), Math.max(1, dp(0.8f)), 0xFFEDE9F4));
         card.setPadding(dp(16), dp(14), dp(16), dp(14));
-        card.addView(row("接单端口", (listenPort == 0 ? "未启动" : String.valueOf(listenPort))));
+        card.addView(row(Ui.pick(act, "端口", "接单端口"),
+                (listenPort == 0 ? "未启动" : String.valueOf(listenPort))));
         card.addView(row("本机地址", Net.localIpv4()));
         card.addView(row("局域网发现", listenPort == 0 ? "未启动" : "UDP 8766 监听中"));
         // 原来这里是「穿透进程」（frpc）。frpc 已整体移除，
@@ -728,7 +732,11 @@ public class RecvScreen extends LinearLayout {
         if (relayRoom == null) {
             relayText = "未配对";
         } else if (com.couple.xiaowo.core.Relay.enabled(act)) {
-            relayText = "已配对 · 房间 " + relayRoom;
+            relayText = Relay.MODE_CLOUD.equals(Relay.mode(act))
+                    ? "小窝云已启用"
+                    : (Relay.MODE_SELF.equals(Relay.mode(act))
+                    ? "自建服务器 · 房间 " + relayRoom
+                    : "已配对 · 房间 " + relayRoom);
         } else {
             relayText = "已关闭";
         }
@@ -822,7 +830,9 @@ public class RecvScreen extends LinearLayout {
         });
         content.addView(start, top(8));
 
-        content.addView(Ui.tv(act, "提示：换端口后，正在使用这个端口的所有连接都要重新配一次", 10, Ui.SUB, false), top(14));
+        content.addView(Ui.tv(act, Ui.pick(act,
+                "换了端口，之前连着的手机要重新连一次。",
+                "提示：换端口后，正在使用这个端口的所有连接都要重新配一次"), 10, Ui.SUB, false), top(14));
 
         scroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1111,7 +1121,26 @@ public class RecvScreen extends LinearLayout {
         upLp.topMargin = dp(12);
         content.addView(UpdateCard.build(act), upLp);
 
-        content.addView(Ui.tv(act, "小窝 · 张老师的接单端 " + Ui.appVersion(act) + "\n支持同 Wi-Fi 自动发现、Tailscale 与异地中转",
+        final TextView proBtn = Ui.pill(act,
+                Ui.pro(act) ? "🧑‍🔧 专业模式：开" : "🧑‍🔧 专业模式：关",
+                Ui.pro(act) ? Ui.PRIMARY : Ui.PRIMARY_SOFT,
+                Ui.pro(act) ? 0xFFFFFFFF : Ui.PRIMARY_DEEP, 12, 22, 9, true);
+        proBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                Ui.setPro(act, !Ui.pro(act));
+                Toast2.ok(act, Ui.pro(act) ? "专业模式已打开" : "已切换到简洁模式");
+                switchTab(tab);
+            }
+        });
+        LinearLayout.LayoutParams proLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        proLp.topMargin = dp(12);
+        content.addView(proBtn, proLp);
+
+        content.addView(Ui.tv(act, Ui.pick(act,
+                        "小窝 · 张老师的接单端 " + Ui.appVersion(act),
+                        "小窝 · 张老师的接单端 " + Ui.appVersion(act)
+                                + "\n支持同 Wi-Fi 自动发现、Tailscale 与异地中转"),
                 10, Ui.TEXT_MUTED, false), top(16));
 
         scroll.addView(content, new ScrollView.LayoutParams(
@@ -1184,7 +1213,12 @@ public class RecvScreen extends LinearLayout {
         }
         column.addView(bubble);
 
-        TextView stamp = Ui.tv(act, (mine ? "我 · " : "猫猫 · ") + time, 9, Ui.TEXT_MUTED, false);
+        String who = mine ? "我" : "猫猫";
+        if (!mine && m.from != null && m.from.length() > 0) {
+            // 多台点单端时，这句话是哪台说的就能分清
+            who = "猫猫(" + m.from + ")";
+        }
+        TextView stamp = Ui.tv(act, who + " · " + time, 9, Ui.TEXT_MUTED, false);
         stamp.setPadding(0, dp(3), dp(2), 0);
         if (mine) {
             stamp.setGravity(Gravity.END);
@@ -1313,10 +1347,32 @@ public class RecvScreen extends LinearLayout {
      *   3) 中转（点单端收到 TYPE_SHOT 后自己截、自己回传）
      */
     private void requestShot() {
+        requestShot(null);
+    }
+
+    /**
+     * 点名某台点单端截屏。
+     *
+     * @param toId 那台的设备编号；null/空 = 广播（老行为，所有在线的都截）
+     */
+    private void requestShot(final String toId) {
         toast("让猫猫截屏中…");
         new Thread(new Runnable() {
             public void run() {
                 String img = null;
+                // 点名时先直连那一台（有 host 的话最快）
+                if (toId != null) {
+                    PeerClient target = null;
+                    synchronized (orderClients) {
+                        target = orderClients.get(toId);
+                    }
+                    if (target != null && target.host != null && target.host.length() > 0
+                            && target.port > 0) {
+                        img = extractShotImg(Net.post(target.host, target.port,
+                                Protocol.PATH_SHOT,
+                                Protocol.withTo(Protocol.shot(Protocol.NAME_RECV), toId), 8000));
+                    }
+                }
 
                 // 1) 保存的 peer 地址
                 String host = sp.getString("peer_host", null);
@@ -1358,7 +1414,7 @@ public class RecvScreen extends LinearLayout {
                 // 3) 直连都不通，走中转
                 if (Relay.enabled(act)) {
                     if (Relay.publish(act, Protocol.ROLE_RECV,
-                            Protocol.shot(Protocol.NAME_RECV), 8000)) {
+                            Protocol.withTo(Protocol.shot(Protocol.NAME_RECV), toId), 8000)) {
                         act.runOnUiThread(new Runnable() {
                             public void run() {
                                 toast("已向猫猫请求截图，等她截好传过来");
@@ -1489,11 +1545,21 @@ public class RecvScreen extends LinearLayout {
      *   直连 → 中转
      */
     private void buzzCat(int level) {
+        buzzCat(level, null);
+    }
+
+    /**
+     * 点名震某一台点单端。
+     *
+     * @param toId 设备编号；null/空 = 全部在线的都震
+     */
+    private void buzzCat(int level, final String toId) {
         final int ms = level == 0 ? 200 : (level == 1 ? 600 : 1500);
         final String[] reasons = {
                 "轻轻碰了你一下", "张老师叫你", "张老师急着找你！！"
         };
-        final String buzzBody = Protocol.buzz(reasons[level], ms, Protocol.NAME_RECV);
+        final String rawBuzz = Protocol.buzz(reasons[level], ms, Protocol.NAME_RECV);
+        final String buzzBody = Protocol.withTo(rawBuzz, toId);
         final String catHost = sp.getString("peer_host", null);
         final int port = sp.getInt("peer_port", 0);
 
@@ -1607,6 +1673,10 @@ public class RecvScreen extends LinearLayout {
                 }
                 break;
             }
+        }
+        // 直连都不通就走中转：公告也是消息，没必要非等同一个 Wi-Fi
+        if (Relay.enabled(act)) {
+            return Relay.publish(act, Protocol.ROLE_RECV, body, 7000);
         }
         return false;
     }
@@ -2207,6 +2277,82 @@ public class RecvScreen extends LinearLayout {
      * 订阅本身已经收归 Activity 了（只有一份），这里只负责"收到之后怎么处理"。
      * 和 HTTP 那套走同一批处理函数，逻辑天然复用。
      */
+    /**
+     * 点单端问「你手里有没有比我新的包」—— 回一条包信息。
+     *
+     * 走这条而不是让点单端去 GitHub 下载：国内手机连 GitHub 经常连不上，
+     * 而接单端本来就把点单端的包装在 assets 里，中转通道又是随时在线的。
+     */
+    private void serveApkInfo(String payload) {
+        final ApkRelay.Info info = ApkRelay.bundledInfo(act);
+        if (info == null) {
+            return;
+        }
+        final byte[] bytes = ApkRelay.bundledBytes(act);
+        if (bytes == null || bytes.length == 0) {
+            return;
+        }
+        String toId = "";
+        try {
+            toId = Json.str(Json.asObject(Json.parse(payload)), "fromId", "");
+        } catch (Exception ignore) {
+        }
+        int chunks = (bytes.length + ApkMqtt.CHUNK - 1) / ApkMqtt.CHUNK;
+        final String body = Json.object(Json.fields(
+                "type", Json.quote(Protocol.TYPE_APK_INFO),
+                "from", Json.quote(Protocol.ROLE_RECV),
+                "to", Json.quote(toId),
+                "versionCode", String.valueOf(info.versionCode),
+                "versionName", Json.quote(info.versionName),
+                "size", String.valueOf(bytes.length),
+                "chunks", String.valueOf(chunks),
+                "chunkSize", String.valueOf(ApkMqtt.CHUNK),
+                "ts", String.valueOf(System.currentTimeMillis())));
+        new Thread(new Runnable() {
+            public void run() {
+                Relay.publish(act, Protocol.ROLE_RECV, body, 6000);
+            }
+        }).start();
+    }
+
+    /** 点单端要第 seq 块 —— 切出来发过去（base64） */
+    private void serveApkPart(String payload) {
+        final byte[] bytes = ApkRelay.bundledBytes(act);
+        if (bytes == null || bytes.length == 0) {
+            return;
+        }
+        int seq = 0;
+        String toId = "";
+        try {
+            Map<String, Object> m = Json.asObject(Json.parse(payload));
+            seq = (int) Json.num(m, "seq", 0);
+            toId = Json.str(m, "fromId", "");
+        } catch (Exception ignore) {
+        }
+        final int off = seq * ApkMqtt.CHUNK;
+        if (off < 0 || off >= bytes.length) {
+            return;
+        }
+        final int len = Math.min(ApkMqtt.CHUNK, bytes.length - off);
+        final byte[] slice = new byte[len];
+        System.arraycopy(bytes, off, slice, 0, len);
+        final int rSeq = seq;
+        final String rTo = toId;
+        new Thread(new Runnable() {
+            public void run() {
+                String data = android.util.Base64.encodeToString(slice, android.util.Base64.NO_WRAP);
+                String body = Json.object(Json.fields(
+                        "type", Json.quote(Protocol.TYPE_APK_PART),
+                        "from", Json.quote(Protocol.ROLE_RECV),
+                        "to", Json.quote(rTo),
+                        "seq", String.valueOf(rSeq),
+                        "data", Json.quote(data),
+                        "ts", String.valueOf(System.currentTimeMillis())));
+                Relay.publish(act, Protocol.ROLE_RECV, body, 8000);
+            }
+        }).start();
+    }
+
     public void onRelayMessage(String type, String payload) {
         try {
             if (Protocol.TYPE_PRESENCE.equals(type)) {
@@ -2234,6 +2380,10 @@ public class RecvScreen extends LinearLayout {
                         }
                     }).start();
                 }
+            } else if (Protocol.TYPE_APK_REQ.equals(type)) {
+                serveApkInfo(payload);
+            } else if (Protocol.TYPE_APK_GET.equals(type)) {
+                serveApkPart(payload);
             } else if (Protocol.TYPE_CHAT.equals(type)) {
                 onChatIncoming(Social.Msg.fromJson(payload));
             } else if (Protocol.TYPE_MENU.equals(type)) {
@@ -2393,6 +2543,60 @@ public class RecvScreen extends LinearLayout {
      *   · 识别码就是 Client.id()，同一台手机永远不变，方便对照是哪一台
      *   · 时间做成"刚刚/N 秒前/N 分钟前"，掉线后也能看出最后活跃时间
      */
+    /**
+     * 一台点单端的操作菜单。
+     *
+     * 多台点单端同时在线时，「看屏幕」「叫一下」都必须能点名，
+     * 否则三台一起响、三张截图糊一脸，根本分不清是谁。
+     */
+    private void showClientMenu(final PeerClient c) {
+        final android.app.Dialog[] dlg = new android.app.Dialog[1];
+        LinearLayout box = Ui.vertical(act);
+        box.addView(Ui.tv(act, (c.device == null || c.device.length() == 0 ? "点单端" : c.device)
+                + " · " + c.name, 13.5f, Ui.TEXT, true));
+        box.addView(Ui.tv(act, c.host == null || c.host.length() == 0
+                        ? "现在只能经中转联系她" : "地址 " + c.host + ":" + c.port,
+                10.5f, Ui.TEXT_MUTED, false), top(4));
+
+        TextView shotBtn = Ui.pill(act, "📸 看她的屏幕", Ui.PRIMARY, 0xFFFFFFFF,
+                12f, 14, 9, true);
+        shotBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (dlg[0] != null) {
+                    DialogKit.dismiss(dlg[0]);
+                }
+                requestShot(c.id);
+            }
+        });
+        box.addView(shotBtn, top(10));
+
+        TextView buzzBtn = Ui.pill(act, "📳 震她一下", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                12f, 14, 9, true);
+        buzzBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (dlg[0] != null) {
+                    DialogKit.dismiss(dlg[0]);
+                }
+                buzzCat(2, c.id);
+            }
+        });
+        box.addView(buzzBtn, top(8));
+
+        TextView chatBtn = Ui.pill(act, "💬 去聊天", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                12f, 14, 9, true);
+        chatBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (dlg[0] != null) {
+                    DialogKit.dismiss(dlg[0]);
+                }
+                switchTab(TAB_ME);
+            }
+        });
+        box.addView(chatBtn, top(8));
+
+        dlg[0] = DialogKit.custom(act, "这台点单端", box, "关闭", null);
+    }
+
     private void refreshClients() {
         if (clientsText == null) {
             return;
@@ -2438,6 +2642,22 @@ public class RecvScreen extends LinearLayout {
             TextView tv = Ui.tv(act, sb.toString(), 10.5f, Ui.TEXT_SUB, false);
             row.addView(tv, new LinearLayout.LayoutParams(0,
                     LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            // 点这一行 = 只对这台动手（多台点单端时不用再猜是谁）
+            TextView ops = Ui.pill(act, "操作", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                    10, 10, 6, true);
+            final PeerClient target = c;
+            ops.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    showClientMenu(target);
+                }
+            });
+            row.addView(ops);
+            row.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    showClientMenu(target);
+                }
+            });
             clientsBox.addView(row, top(3));
         }
     }
@@ -2633,13 +2853,19 @@ public class RecvScreen extends LinearLayout {
         host.burst(22);
         new Thread(new Runnable() {
             public void run() {
+                String heartBody = Protocol.heart("小窝·接单", "抱抱你，已接单！");
                 String r = Net.post(o.replyHost, o.replyPort, Protocol.PATH_HEART,
-                        Protocol.heart("小窝·接单", "抱抱你，已接单！"), 2500);
+                        heartBody, 2500);
                 if (!Protocol.isOk(r)) {
                     r = Net.post("127.0.0.1", o.replyPort, Protocol.PATH_HEART,
-                            Protocol.heart("小窝·接单", "抱抱你，已接单！"), 1500);
+                            heartBody, 1500);
                 }
-                final boolean ok = Protocol.isOk(r);
+                boolean okNow = Protocol.isOk(r);
+                // 直连不通就从中转回爱心（异地时唯一的路）
+                if (!okNow && Relay.enabled(act)) {
+                    okNow = Relay.publish(act, Protocol.ROLE_RECV, heartBody, 6000);
+                }
+                final boolean ok = okNow;
                 act.runOnUiThread(new Runnable() {
                     public void run() {
                         toast(ok ? "爱心已经飞过去啦 💗" : "对方好像不在线…");

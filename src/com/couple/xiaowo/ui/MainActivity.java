@@ -98,18 +98,34 @@ public class MainActivity extends Activity implements HeartHost {
      * 原来首页卡片是建页面时写死的一句「未配对」，之后再没人改它，
      * 所以配对了也永远显示未配对（用户报的就是这个）。
      */
+    /**
+     * 首页那一行状态。
+     *
+     * 三种通道各写各的，别再出现"界面写房间码、其实连的是服务器"：
+     *   云   → 小窝云 · 在线
+     *   公共 → 公共房间 HM0822 · 在线
+     *   自建 → 自建服务器 · 在线
+     */
     private String relayStatusText() {
         String room = Relay.room(this);
+        String mode = Relay.mode(this);
+        boolean cloud = Relay.MODE_CLOUD.equals(mode);
+        boolean self = Relay.MODE_SELF.equals(mode);
+        String name = cloud ? "小窝云" : (self ? "自建服务器" : "公共房间");
         if (room == null || !Relay.enabled(this)) {
-            return "未配对";
+            return cloud ? "小窝云（等待启用）" : "未开启";
         }
+        String state;
         if (relaySub == null) {
-            return "准备连接…（房间 " + room + "）";
+            state = "准备连接…";
+        } else if (relaySub.isOnline()) {
+            state = "在线";
+        } else {
+            state = relayLastNote.length() > 0 ? relayLastNote : "重连中…";
         }
-        if (relaySub.isOnline()) {
-            return "在线 · 房间 " + room;
-        }
-        return (relayLastNote.length() > 0 ? relayLastNote : "重连中…") + "　房间 " + room;
+        // 只有自己编的房间码需要露出来，云模式用预置房间，露出来只会让人以为要手填
+        return cloud ? (name + " · " + state)
+                : (name + " " + room + " · " + state);
     }
 
     private void notifyRelayViews() {
@@ -607,6 +623,16 @@ public class MainActivity extends Activity implements HeartHost {
          * 现在交给 Ambient 传感器在 resume 后自行按滞回规则判断（阈值放宽 + 8 秒节流），
          * 只在真的跨过阈值时才切换一次。
          */
+        /*
+         * 回到前台：长连接如果已经掉了就马上重连。
+         *
+         * 国内 ROM 一到后台就掐网络/冻结进程，等它自己重连要好几秒，
+         * 这几秒里对方发的消息就白发了。主动补一次，用户看不到"未连接"。
+         */
+        if (relaySub != null && !relaySub.isOnline()) {
+            restartRelay();
+        }
+
         // 回到前台：把常驻通知恢复成正常状态
         KeepAlive.update(this, BuildInfo.IS_ORDER ? Protocol.ROLE_ORDER : Protocol.ROLE_RECV,
                 BuildInfo.IS_ORDER ? "猫猫在线，正在等你接单" : "张老师在接单，随时可以点单");

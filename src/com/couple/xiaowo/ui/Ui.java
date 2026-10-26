@@ -421,6 +421,24 @@ public final class Ui {
     }
 
     /** 真实版本号，避免页面里手写版本字符串写漏 */
+    /** 专业模式：打开后显示技术细节（服务器/端口/QoS 那些），关掉就是给普通人看的白话 */
+    public static final String KEY_PRO = "pro_mode";
+
+    public static boolean pro(Context c) {
+        return c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
+                .getBoolean(KEY_PRO, false);
+    }
+
+    public static void setPro(Context c, boolean on) {
+        c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_PRO, on).apply();
+    }
+
+    /** 按专业模式在两句文案里挑一句 */
+    public static String pick(Context c, String simple, String pro) {
+        return pro(c) ? pro : simple;
+    }
+
     public static String appVersion(Context c) {
         try {
             android.content.pm.PackageInfo pi = c.getPackageManager()

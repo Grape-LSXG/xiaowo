@@ -101,9 +101,10 @@ public final class ConnectPage {
         box.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 12), Ui.dpi(act, 14), Ui.dpi(act, 12));
 
         box.addView(Ui.tv(act, isRecv ? "让猫猫找到你" : "找到张老师", 15, Ui.TEXT, true));
-        box.addView(Ui.tv(act,
-                "下面三种方式，任意一种通了就能用。\n"
-                        + "系统会自动按「Wi-Fi → Tailscale → 中转」的顺序尝试。",
+        box.addView(Ui.tv(act, Ui.pick(act,
+                        "三种方式选一种就好，通了就能用，不用都配。",
+                        "下面三种方式，任意一种通了就能用。\n"
+                                + "系统会自动按「同 Wi-Fi → Tailscale → 异地连接」的顺序尝试。"),
                 10.5f, Ui.TEXT_SUB, false), top(act, 5));
         return box;
     }
@@ -112,11 +113,13 @@ public final class ConnectPage {
         LinearLayout box = Ui.vertical(act);
         box.setPadding(Ui.dpi(act, 12), Ui.dpi(act, 10), Ui.dpi(act, 12), Ui.dpi(act, 10));
         box.setBackground(Ui.round(Ui.PRIMARY_SOFT, Ui.dp(act, Ui.R_TILE)));
-        box.addView(Ui.tv(act, "怎么选？", 11.5f, Ui.PRIMARY_DEEP, true));
-        box.addView(Ui.tv(act,
-                "· 在家里同一个 Wi-Fi —— 什么都不用配，自动就能找到\n"
-                        + "· 一个人在家、一个人在宿舍 —— 用「异地中转」，配对一次就行\n"
-                        + "· 两台手机都装了 Tailscale —— 填 100.x 地址，比中转快",
+        box.addView(Ui.tv(act, Ui.pick(act, "小提示", "怎么选？"), 11.5f, Ui.PRIMARY_DEEP, true));
+        box.addView(Ui.tv(act, Ui.pick(act,
+                        "· 在一起：什么都不用配\n"
+                                + "· 不在一起：用「异地连接」，选一次就行",
+                        "· 在家里同一个 Wi-Fi —— 什么都不用配，自动就能找到\n"
+                                + "· 一个人在家、一个人在宿舍 —— 用「异地连接」，配对一次就行\n"
+                                + "· 两台手机都装了 Tailscale —— 填 100.x 地址，比中转快"),
                 10, Ui.TEXT_SUB, false), top(act, 4));
         return box;
     }
@@ -252,7 +255,8 @@ public final class ConnectPage {
         LinearLayout box = Ui.vertical(act);
         box.setPadding(Ui.dpi(act, 20), Ui.dpi(act, 8), Ui.dpi(act, 20), Ui.dpi(act, 8));
 
-        box.addView(Ui.tv(act, "对方的地址（IP:端口）", 11, Ui.PRIMARY_DEEP, true));
+        box.addView(Ui.tv(act, Ui.pick(act, "对方的地址", "对方的地址（IP:端口）"),
+                11, Ui.PRIMARY_DEEP, true));
         final EditText et = new EditText(act);
         et.setHint("192.168.1.8:8765　或　100.94.232.43:8765");
         String cur = sp.getString("peer_host", null);
@@ -298,128 +302,201 @@ public final class ConnectPage {
         });
     }
 
-    // ---------------------------------------------------------------- 卡片 3：异地中转
+    // ---------------------------------------------------------------- 卡片 3：异地连接
 
+    /**
+     * 异地连接只有三种，且**必须**分清楚：
+     *
+     *   ☁️ 小窝云    —— APK 里预置的服务器 + 预置房间，装上就通，用户什么都不用填
+     *   📻 房间码    —— 公共 broker + 自己编的 6 位码（以前的玩法）
+     *   🖥 自建服务器 —— 自己搭的 mosquitto/EMQX + 房间码
+     *
+     * 以前这里只写"房间码"，实际连的却是预置服务器，界面和代码对不上，
+     * 用户自然会困惑。现在选哪种就只显示哪种，状态行读的也是真实值。
+     */
     private static View relayCard(final Activity act, final String room, final boolean isRecv,
                                   final Runnable rebuild, final Runnable onChanged) {
         LinearLayout card = cardShell(act);
-        final boolean has = room != null && room.length() > 0;
-        card.addView(cardHead(act, "🌐", "异地中转",
-                "不在同一个网络时用 · 配对一次永久有效", 0xFFEC4899));
+        card.addView(cardHead(act, "🌐", "异地连接",
+                "不在一起时走这条 · 三种方式选一种", 0xFFEC4899));
 
-        card.addView(Ui.tv(act,
-                isRecv
-                        ? "1. 点下面的按钮生成一个房间码\n"
-                        + "2. 把房间码发给猫猫（微信、短信都行）\n"
-                        + "3. 猫猫在「连接方式 → 异地中转」里填一次，以后永不再配"
-                        : "1. 问张老师要一个房间码（6 位）\n"
-                        + "2. 点下面的按钮填进去\n"
-                        + "3. 填一次就行，换 Wi-Fi、重启都不用再填",
+        final String mode = Relay.mode(act);
+        card.addView(Ui.tv(act, isRecv
+                ? "选好之后把「房间码」告诉猫猫一次，以后都不用再弄。"
+                : "三种方式张老师选哪种，你就选哪种；房间码问他要一个填进来。",
                 10.5f, Ui.TEXT_SUB, false), top(act, 6));
 
-        final TextView status = Ui.tv(act,
-                has ? ("当前房间：" + room + "（已配对）") : "还没配对",
-                10.5f, has ? Ui.PRIMARY_DEEP : Ui.TEXT_MUTED, true);
-        card.addView(status, top(act, 8));
-
-        LinearLayout row = Ui.horizontal(act);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-
-        if (isRecv) {
-            TextView gen = Ui.pill(act, has ? "换一个房间码" : "生成房间码", Ui.PRIMARY,
-                    0xFFFFFFFF, 11.5f, 14, 8, true);
-            gen.setOnClickListener(new View.OnClickListener() {
+        // ---------- 三选一 ----------
+        LinearLayout modes = Ui.horizontal(act);
+        modes.setGravity(Gravity.CENTER_VERTICAL);
+        String[][] defs = new String[][]{
+                {Relay.MODE_CLOUD, "☁️ 小窝云"},
+                {Relay.MODE_PUBLIC, "📻 房间码"},
+                {Relay.MODE_SELF, "🖥 自建"},
+        };
+        for (int i = 0; i < defs.length; i++) {
+            final String m = defs[i][0];
+            boolean sel = m.equals(mode);
+            TextView pill = Ui.pill(act, defs[i][1],
+                    sel ? Ui.PRIMARY : 0xFFF1EEF7,
+                    sel ? 0xFFFFFFFF : Ui.TEXT_SUB, 11.5f, 13, 8, true);
+            pill.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    String code = Relay.newPairing(act);
-                    copyToClipboard(act, code);
-                    status.setText("当前房间：" + code + "（已配对，已复制）");
-                    status.setTextColor(Theme.adaptText(Ui.PRIMARY_DEEP));
+                    Relay.setMode(act, m);
+                    if (act instanceof MainActivity) {
+                        ((MainActivity) act).restartRelay();
+                    }
                     rebuild.run();
                     if (onChanged != null) {
                         onChanged.run();
                     }
-                    Toast2.ok(act, "房间码 " + code + " 已复制，发给猫猫");
                 }
             });
-            row.addView(gen);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i > 0) {
+                lp.leftMargin = Ui.dpi(act, 8);
+            }
+            modes.addView(pill, lp);
+        }
+        card.addView(modes, top(act, 10));
+
+        // ---------- 当前用的是哪一套 ----------
+        TextView cur;
+        if (Relay.MODE_CLOUD.equals(mode)) {
+            cur = Ui.tv(act, "当前：小窝云，房间 " + (room == null ? "—" : room) + "（不用你配置）",
+                    10.5f, Ui.SUCCESS, false);
+        } else if (Relay.MODE_SELF.equals(mode)) {
+            cur = Ui.tv(act, "当前：自建服务器 " + Mqtt.cfgHostText() + ":" + Mqtt.cfgPortValue()
+                    + (room == null ? "" : " · 房间 " + room), 10.5f, Ui.SUCCESS, false);
         } else {
-            TextView join = Ui.pill(act, has ? "换一个房间码" : "填房间码加入",
-                    Ui.PRIMARY, 0xFFFFFFFF, 11.5f, 14, 8, true);
-            join.setOnClickListener(new View.OnClickListener() {
+            cur = Ui.tv(act, room == null
+                            ? "当前：公共房间，还没编房间码" : "当前：公共房间 " + room,
+                    10.5f, room == null ? Ui.TEXT_MUTED : Ui.SUCCESS, false);
+        }
+        card.addView(cur, top(act, 8));
+
+        // ---------- 这一套的操作按钮 ----------
+        LinearLayout row = Ui.horizontal(act);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int added = 0;
+
+        if (Relay.MODE_CLOUD.equals(mode)) {
+            TextView toPublic = Ui.pill(act, "改用房间码", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                    11, 12, 8, true);
+            toPublic.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
+                    Relay.setMode(act, Relay.MODE_PUBLIC);
                     promptRoom(act, rebuild, onChanged);
                 }
             });
-            row.addView(join);
+            row.addView(toPublic);
+            added++;
+            if (!Mqtt.hasOwnBroker()) {
+                // 云模式下 hasOwnBroker 恒真（走的是预置），这里只提供出口
+                TextView toSelf = Ui.pill(act, "自建服务器", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                        11, 12, 8, true);
+                toSelf.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        promptBroker(act, rebuild, onChanged, cur);
+                    }
+                });
+                LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                sp.leftMargin = Ui.dpi(act, 8);
+                row.addView(toSelf, sp);
+                added++;
+            }
+        } else {
+            if (isRecv) {
+                TextView gen = Ui.pill(act, room == null ? "生成房间码" : "换一个房间码",
+                        Ui.PRIMARY, 0xFFFFFFFF, 11.5f, 14, 8, true);
+                gen.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        String code = Relay.newPairing(act);
+                        copyToClipboard(act, code);
+                        rebuild.run();
+                        if (onChanged != null) {
+                            onChanged.run();
+                        }
+                        Toast2.ok(act, "房间码 " + code + " 已复制，发给猫猫");
+                    }
+                });
+                row.addView(gen);
+                added++;
+            } else {
+                TextView join = Ui.pill(act, room == null ? "填房间码加入" : "换一个房间码",
+                        Ui.PRIMARY, 0xFFFFFFFF, 11.5f, 14, 8, true);
+                join.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        promptRoom(act, rebuild, onChanged);
+                    }
+                });
+                row.addView(join);
+                added++;
+            }
+            if (room != null) {
+                TextView copy = Ui.pill(act, "复制", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                        11, 12, 8, true);
+                copy.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        copyToClipboard(act, room);
+                        Toast2.ok(act, "已复制 " + room);
+                    }
+                });
+                LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                cLp.leftMargin = Ui.dpi(act, 8);
+                row.addView(copy, cLp);
+                added++;
+            }
+            if (Relay.MODE_SELF.equals(mode)) {
+                TextView srvBtn = Ui.pill(act, "改服务器", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                        11, 12, 8, true);
+                srvBtn.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        promptBroker(act, rebuild, onChanged, cur);
+                    }
+                });
+                LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                sLp.leftMargin = Ui.dpi(act, 8);
+                row.addView(srvBtn, sLp);
+                added++;
+            } else {
+                TextView srvBtn = Ui.pill(act, "自建服务器", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
+                        11, 12, 8, true);
+                srvBtn.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        promptBroker(act, rebuild, onChanged, cur);
+                    }
+                });
+                LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                sLp.leftMargin = Ui.dpi(act, 8);
+                row.addView(srvBtn, sLp);
+                added++;
+            }
+        }
+        if (added > 0) {
+            card.addView(row, top(act, 10));
         }
 
-        if (has) {
-            TextView copy = Ui.pill(act, "复制", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP,
-                    11, 12, 8, true);
-            copy.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    copyToClipboard(act, room);
-                    Toast2.ok(act, "已复制 " + room);
-                }
-            });
-            LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            cLp.leftMargin = Ui.dpi(act, 8);
-            row.addView(copy, cLp);
-
-            TextView cut = Ui.pill(act, "解除", 0xFFFDECEC, 0xFFD2453F, 11, 12, 8, true);
-            cut.setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {
-                    DialogKit.confirm(act, "解除配对？",
-                            "解除后异地就收不到了，只能靠同一个 Wi-Fi。",
-                            "解除", new Runnable() {
-                                public void run() {
-                                    Relay.clear(act);
-                                    rebuild.run();
-                                    if (onChanged != null) {
-                                        onChanged.run();
-                                    }
-                                }
-                            });
-                }
-            });
-            LinearLayout.LayoutParams xLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            xLp.leftMargin = Ui.dpi(act, 8);
-            row.addView(cut, xLp);
-        }
-        card.addView(row, top(act, 10));
-
-        /*
-         * 服务器一行。
-         *
-         * 公共 broker 在国内不稳（还明文），所以给个入口换成自己搭的。
-         * 换了要立刻重连，否则要等下一次断线才会用上新地址。
-         */
-        Mqtt.configure(act);
-        final TextView srv = Ui.tv(act, "服务器：" + Mqtt.endpointText()
-                + (Mqtt.usingPreset() ? "（已预置，不用配）"
-                   : Mqtt.hasOwnBroker() ? "" : "（公共，建议自建）"),
-                10, (Mqtt.hasOwnBroker() || Mqtt.usingPreset()) ? Ui.SUCCESS : Ui.TEXT_MUTED, false);
-        card.addView(srv, top(act, 6));
-        TextView selfHost = Ui.pill(act, Mqtt.hasOwnBroker() ? "改自建服务器" : "自建服务器",
-                Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 11, 12, 8, true);
-        selfHost.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                promptBroker(act, rebuild, onChanged, srv);
-            }
-        });
-        card.addView(selfHost, top(act, 8));
-
-        // 中转的"在线"是真实维护的，直接读
-        if (has) {
-            TextView live = Ui.tv(act, "中转状态：正在连接…", 10, Ui.TEXT_MUTED, false);
-            card.addView(live, top(act, 6));
-            if (act instanceof MainActivity) {
-                ((MainActivity) act).bindRelayStatus(live);
-            }
+        // ---------- 真实连接状态 ----------
+        TextView live = Ui.tv(act, "连接状态：正在检查…", 10, Ui.TEXT_MUTED, false);
+        card.addView(live, top(act, 6));
+        if (act instanceof MainActivity) {
+            ((MainActivity) act).bindRelayStatus(live);
         }
         return card;
+    }
+
+    private static void clearRoom(Activity act, Runnable rebuild, Runnable onChanged) {
+        Relay.clear(act);
+        rebuild.run();
+        if (onChanged != null) {
+            onChanged.run();
+        }
     }
 
     /**
@@ -434,7 +511,9 @@ public final class ConnectPage {
         LinearLayout box = Ui.vertical(act);
         box.setPadding(Ui.dpi(act, 4), Ui.dpi(act, 2), Ui.dpi(act, 4), Ui.dpi(act, 2));
 
-        box.addView(Ui.tv(act, "自己搭的 mosquitto（阿里云/腾讯云都行）。留空表示继续用公共 broker。",
+        box.addView(Ui.tv(act, Ui.pick(act,
+                        "只有你自己搭了服务器才需要填这里。没搭就关掉这个窗口。",
+                        "自己搭的 mosquitto（阿里云/腾讯云都行）。留空表示继续用公共 broker。"),
                 10.5f, Ui.TEXT_SUB, false));
 
         final EditText host = field(act, "地址，如 47.98.1.2", Mqtt.cfgHostText());
@@ -504,7 +583,8 @@ public final class ConnectPage {
                     onChanged.run();
                 }
                 Toast2.ok(act, h.length() == 0
-                        ? "已切回公共 broker" : "已保存，正在连 " + h);
+                        ? Ui.pick(act, "已改回公用通道", "已切回公共 broker")
+                        : Ui.pick(act, "保存好啦，正在连…", "已保存，正在连 " + h));
             }
         });
     }

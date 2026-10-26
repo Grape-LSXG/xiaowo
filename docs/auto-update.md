@@ -442,3 +442,41 @@ SKIP_BUILD=1 bash tools/publish.sh local
 python3 tools/make_version_json.py --help
 bash tools/publish.sh --help
 ```
+
+---
+
+## 10. v4.10 起：可用的更新通道有两条
+
+### 10.1 网页清单（原来那条，现在修好了）
+
+旧版的默认清单地址指向一个已经变成 403 的 Gitee 仓库，所以**所有人点「检查更新」都失败**
+（模拟器里 4.5 永远看不到 4.9，原因就在这里）。现在 `Updater` 会按顺序试三条：
+
+1. 用户在「设置更新地址」里自己填的（有就先用）
+2. `https://cdn.jsdelivr.net/gh/Grape-LSXG/xiaowo@main/dist/version.json`
+3. `https://raw.githubusercontent.com/Grape-LSXG/xiaowo/main/dist/version.json`
+4. 老的 Gitee 地址（留作最后兜底）
+
+第一条通就用第一条，全不通才报错。清单里的 APK 地址用 GitHub Release 的
+`/releases/latest/download/xiaowo-{order,recv}.apk`，所以每次发版要往新 release 里传这两个名字的资产。
+
+### 10.2 经中转分块直传（国内最稳）
+
+接单端的 `assets/apk/xiaowo-order.apk` 里本来就带着点单端的新包。v4.10 起点单端可以
+**经 MQTT 一块一块把它拉过来**，不需要任何网站：
+
+```
+点单端                     接单端
+── apkReq ───────────────▶
+◀─────────────── apkInfo ──  versionCode / size / chunks
+── apkGet {seq:0} ───────▶
+◀──────────── apkPart {0} ──
+...  每块 24KB（base64 后约 32KB），收到一块才要下一块
+```
+
+- 实现在 [`src/com/couple/xiaowo/core/ApkMqtt.java`](../src/com/couple/xiaowo/core/ApkMqtt.java)，
+  接单端在 [`RecvScreen.java`](../src/com/couple/xiaowo/ui/RecvScreen.java) 的 `serveApkInfo` / `serveApkPart`。
+- 单块最多重试 5 次，只重传那一块，不会整包重来。
+- 入口：点单端「我 → 📥 从张老师那儿接收」；网页清单查不到时会自动改走这条路。
+- 前提：两端在同一条中转通道上（小窝云 / 房间码 / 自建服务器都行）。
+

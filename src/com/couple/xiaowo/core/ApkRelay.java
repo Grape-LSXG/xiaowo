@@ -46,6 +46,20 @@ public final class ApkRelay {
         }
     }
 
+    /** 内置包缓存：经中转分块发送时会反复取用同一份字节 */
+    private static byte[] cache;
+
+    public static synchronized byte[] bundledBytes(Context c) {
+        if (cache == null) {
+            cache = readBundled(c);
+        }
+        return cache;
+    }
+
+    public static synchronized void dropBundledCache() {
+        cache = null;
+    }
+
     public static byte[] readBundled(Context c) {
         InputStream in = null;
         try {

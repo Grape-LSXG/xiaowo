@@ -50,6 +50,23 @@ public final class Protocol {
     public static final String TYPE_SHOT = "shot";
     public static final String TYPE_SHOT_IMG = "shotImg";
 
+    /*
+     * 经 MQTT 传安装包（点单端从接单端更新自己）。
+     *
+     * 以前异地时只能"查版本"，查到了也没法下载 ——
+     * 接单端手里明明有内置的点单端 APK，却只能靠同一个 Wi-Fi 才传得过去。
+     * 这里换成"请求 / 分块 / 拼装"三步，走同一条中转通道，
+     * 带宽差一点也没关系，慢就是慢，不会失败。
+     */
+    /** 点单端 → 接单端：你手里有没有比我新的点单端包 */
+    public static final String TYPE_APK_REQ = "apkReq";
+    /** 接单端 → 点单端：包信息（版本、大小、切几块） */
+    public static final String TYPE_APK_INFO = "apkInfo";
+    /** 点单端 → 接单端：要第 seq 块 */
+    public static final String TYPE_APK_GET = "apkGet";
+    /** 接单端 → 点单端：第 seq 块的数据 */
+    public static final String TYPE_APK_PART = "apkPart";
+
     public static final String PATH_ORDER = "/order";
     public static final String PATH_HEART = "/heart";
     public static final String PATH_PING = "/ping";
@@ -71,6 +88,14 @@ public final class Protocol {
     public static final String PATH_SHOT = "/shot";
 
     private Protocol() {
+    }
+
+    /** 一条只带 type 和 from 的短消息（中转里用得很多） */
+    public static String simple(String type, String role) {
+        return Json.object(Json.fields(
+                "type", Json.quote(type),
+                "from", Json.quote(role),
+                "ts", String.valueOf(System.currentTimeMillis())));
     }
 
     // ------------------------------------------------------------------ 模型
@@ -258,6 +283,24 @@ public final class Protocol {
                 "role", Json.quote(ROLE_ORDER),
                 "img", Json.quote(base64),
                 "ts", String.valueOf(System.currentTimeMillis())));
+    }
+
+    /**
+     * 给一条消息加"只给这一台"的标记。
+     *
+     * 多台点单端同时在线时，接单端的「截图 / 震一下」需要能点名某一台，
+     * 否则每台都会执行一遍（三台手机一起响、三张截图糊一脸）。
+     * 收端按 to 过滤；to 为空表示广播，老版本不认识这个字段也没关系。
+     */
+    public static String withTo(String json, String to) {
+        if (json == null || to == null || to.length() == 0) {
+            return json;
+        }
+        int i = json.indexOf('{');
+        if (i < 0) {
+            return json;
+        }
+        return json.substring(0, i + 1) + "\"to\":" + Json.quote(to) + "," + json.substring(i + 1);
     }
 
     public static boolean isOk(String response) {

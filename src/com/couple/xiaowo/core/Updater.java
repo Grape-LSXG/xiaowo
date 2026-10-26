@@ -43,7 +43,20 @@ public final class Updater {
      * 改仓库地址时同步改这里即可。
      */
     public static final String DEFAULT_MANIFEST_URL =
-            "https://gitee.com/Quriosity233/love/raw/master/version.json";
+            "https://cdn.jsdelivr.net/gh/Grape-LSXG/xiaowo@main/dist/version.json";
+
+    /**
+     * 备用清单地址。
+     *
+     * 原来只有 Gitee 一条，结果那条早就 403 了（仓库没了/私有了），
+     * 于是所有人"检查更新"永远失败 —— 4.5 拿不到 4.9 就是这么来的。
+     * 现在按顺序试，谁先通就用谁；全都试不通才报错。
+     */
+    public static final String[] MIRRORS = new String[]{
+            "https://cdn.jsdelivr.net/gh/Grape-LSXG/xiaowo@main/dist/version.json",
+            "https://raw.githubusercontent.com/Grape-LSXG/xiaowo/main/dist/version.json",
+            "https://gitee.com/Quriosity233/love/raw/master/version.json",
+    };
 
     /** 一次检查的结果 */
     public static final class Info {
@@ -154,8 +167,18 @@ public final class Updater {
             public void run() {
                 String error = null;
                 Info info = null;
+                // 用户自己填过地址就先用他的，再按镜像顺序兜底
+                java.util.List<String> urls = new java.util.ArrayList<String>();
+                urls.add(manifestUrl);
+                for (int i = 0; i < MIRRORS.length; i++) {
+                    if (!MIRRORS[i].equals(manifestUrl)) {
+                        urls.add(MIRRORS[i]);
+                    }
+                }
+                String lastErr = null;
+                for (int attempt = 0; attempt < urls.size(); attempt++) {
                 try {
-                    String body = fetch(manifestUrl);
+                    String body = fetch(urls.get(attempt));
                     Map<String, Object> root = Json.asObject(Json.parse(body));
                     Object mine = root.get(role());
                     if (mine == null) {
@@ -172,8 +195,14 @@ public final class Updater {
                     if (i.versionCode > currentVersionCode(c) && i.url.length() > 0) {
                         info = i;
                     }
+                    lastErr = null;
+                    break;
                 } catch (Exception e) {
-                    error = "检查失败：" + e.getMessage();
+                    lastErr = e.getMessage() == null ? "网络不通" : e.getMessage();
+                }
+                }
+                if (lastErr != null) {
+                    error = "检查失败：" + lastErr;
                 }
                 cb.done(info, error);
             }

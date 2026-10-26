@@ -54,8 +54,18 @@ public final class UpdateCard {
                         act.runOnUiThread(new Runnable() {
                             public void run() {
                                 if (error != null) {
-                                    status.setTextColor(Theme.adapt(Ui.WARN));
-                                    status.setText(error);
+                                    /*
+                                     * 网页查不到（国内连不上 GitHub / 镜像挂了）时，
+                                     * 改从接单端手里经中转拿安装包 —— 这条路一直在。
+                                     */
+                                    if (com.couple.xiaowo.core.Relay.enabled(act)) {
+                                        status.setTextColor(Theme.adapt(Ui.TEXT_SUB));
+                                        status.setText("网上查不到，改从张老师那边接收…");
+                                        startRelayPull(act, status);
+                                    } else {
+                                        status.setTextColor(Theme.adapt(Ui.WARN));
+                                        status.setText(error);
+                                    }
                                     return;
                                 }
                                 if (info == null) {
@@ -75,6 +85,23 @@ public final class UpdateCard {
             }
         });
         card.addView(checkBtn, top(act, 10));
+
+        /*
+         * 「从张老师那儿接收」：走中转分块，不依赖任何网站。
+         * 这是国内网络下最稳的一条更新路 —— GitHub 连不上也没关系。
+         */
+        if (com.couple.xiaowo.core.Relay.enabled(act)) {
+            TextView fromPeer = Ui.pill(act, "📥 从张老师那儿接收",
+                    Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 11.5f, 18, 8, true);
+            fromPeer.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    status.setTextColor(Theme.adapt(Ui.TEXT_SUB));
+                    status.setText("正在问张老师有没有新版本…");
+                    startRelayPull(act, status);
+                }
+            });
+            card.addView(fromPeer, top(act, 8));
+        }
 
         // ---- 地址设置 ----
         TextView setUrl = Ui.pill(act, "⚙ 设置更新地址", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 11.5f, 18, 8, true);
@@ -96,11 +123,60 @@ public final class UpdateCard {
         card.addView(setUrl, top(act, 8));
 
         card.addView(Ui.tv(act,
-                "把新 APK 和 version.json 传到任意直链（GitHub Release / 对象存储都行），\n"
-                        + "这里填 version.json 的地址，之后每次点检查就能更新。",
+                Ui.pick(act,
+                        "有新版本点上面「检查更新」就行，这里不用管。",
+                        "把新 APK 和 version.json 传到任意直链（GitHub Release / 对象存储都行），\n"
+                                + "这里填 version.json 的地址，之后每次点检查就能更新。"),
                 10, Ui.TEXT_MUTED, false), top(act, 10));
 
         return card;
+    }
+
+    /** 经中转从接单端拉安装包（分块，见 core/ApkMqtt） */
+    static void startRelayPull(final Activity act, final TextView status) {
+        if (com.couple.xiaowo.core.ApkMqtt.busy()) {
+            status.setText("正在接收安装包里…");
+            return;
+        }
+        com.couple.xiaowo.core.ApkMqtt.start(act, new com.couple.xiaowo.core.ApkMqtt.Listener() {
+            public void onProgress(final int percent, final String note) {
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        status.setText(note);
+                    }
+                });
+            }
+
+            public void onDone(final java.io.File apk, final int vc, final String vn) {
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        status.setTextColor(Theme.adapt(Ui.SUCCESS));
+                        status.setText("收到新版本 " + vn + "，正在安装…");
+                        if (!Updater.canInstall(act)) {
+                            Toast2.warn(act, "需要允许「安装未知应用」才能更新");
+                            Updater.requestInstallPermission(act);
+                            return;
+                        }
+                        String err = Updater.install(act, apk);
+                        if (err != null) {
+                            Toast2.warn(act, "安装包收好了，但调不起安装器：" + err);
+                        } else {
+                            Toast2.ok(act, "正在安装 " + vn);
+                        }
+                    }
+                });
+            }
+
+            public void onError(final String msg) {
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        status.setTextColor(Theme.adapt(Ui.WARN));
+                        status.setText(msg);
+                        Toast2.warn(act, msg);
+                    }
+                });
+            }
+        });
     }
 
     /** 下载 + 安装的那一段，单独抽出来免得匿名类套太深 */

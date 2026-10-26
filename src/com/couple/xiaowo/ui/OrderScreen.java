@@ -340,13 +340,20 @@ public class OrderScreen extends LinearLayout {
     private void sendUpdateAck(final ApkRelay.Info info) {
         final String host = peerHost;
         final int port = peerPort;
-        if (host == null || port <= 0) {
+        final String body = Protocol.updateAck(info.versionCode, info.versionName);
+        // 地址没有也得发：中转这条路一直都在，接单端要靠它记得"这台已经更新了"
+        if ((host == null || port <= 0) && !Relay.enabled(act)) {
             return;
         }
         new Thread(new Runnable() {
             public void run() {
-                Net.post(host, port, Protocol.PATH_ACK_UPDATE,
-                        Protocol.updateAck(info.versionCode, info.versionName), 3000);
+                boolean ok = false;
+                if (host != null && port > 0) {
+                    ok = Protocol.isOk(Net.post(host, port, Protocol.PATH_ACK_UPDATE, body, 3000));
+                }
+                if (!ok && Relay.enabled(act)) {
+                    Relay.publish(act, Protocol.ROLE_ORDER, body, 6000);
+                }
             }
         }).start();
     }
@@ -784,7 +791,8 @@ public class OrderScreen extends LinearLayout {
         box.setPadding(dp(20), dp(8), dp(20), dp(8));
 
         box.addView(Ui.tv(act, "本机地址：" + Net.localIpv4(), 12, Ui.SUB, false));
-        box.addView(Ui.tv(act, "接单端地址（IP:端口，可留空自动发现）", 11, Ui.PRIMARY_DEEP, true), top(12));
+        box.addView(Ui.tv(act, Ui.pick(act, "张老师的地址（不知道就留空）", "接单端地址（IP:端口，可留空自动发现）"),
+                11, Ui.PRIMARY_DEEP, true), top(12));
 
         final EditText et = new EditText(act);
         et.setHint("100.94.232.43:8765　或　192.168.1.8:8765");
@@ -806,7 +814,10 @@ public class OrderScreen extends LinearLayout {
         // ---- 异地配对（只需一次）----
         final String room = Relay.room(act);
         TextView pairBtn = Ui.pill(act,
-                room == null ? "🌐 异地配对（填一次房间码，永久有效）" : ("🌐 已配对：" + room),
+                room == null ? "🌐 异地连接（点这里配一次）"
+                        : (Relay.MODE_CLOUD.equals(Relay.mode(act))
+                        ? "🌐 异地连接：小窝云已启用"
+                        : ("🌐 已配对：" + room)),
                 room == null ? 0xFFF2EEFB : Ui.PRIMARY_SOFT,
                 Ui.PRIMARY_DEEP, 11.5f, 14, 8, true);
         pairBtn.setOnClickListener(new OnClickListener() {
@@ -887,7 +898,7 @@ public class OrderScreen extends LinearLayout {
 
         box.addView(Ui.tv(act, "异地时靠这条通路收发，填一次就永久有效。",
                 10.5f, Ui.TEXT_SUB, false));
-        box.addView(Ui.tv(act, "接单端「异地配对」里复制的房间码，粘在下面：",
+        box.addView(Ui.tv(act, "接单端「异地连接」里复制的房间码，粘在下面：",
                 11, Ui.PRIMARY_DEEP, true), top(10));
 
         final EditText et = new EditText(act);
@@ -925,6 +936,29 @@ public class OrderScreen extends LinearLayout {
      */
     public void onRelayMessage(String type, String payload) {
         try {
+            /*
+             * 多台点单端时，一条消息不应该被所有点单端都当成自己的。
+             * 带 to 的（指定设备/指定角色）先过滤一遍：
+             *   "recv"/"order" = 给那一端的（谁收到都是给自己这边用）
+             *   <设备编号>      = 只给那一台
+             */
+            String to = "";
+            try {
+                to = Json.str(Json.asObject(Json.parse(payload)), "to", "");
+            } catch (Exception ignore) {
+            }
+            if (to.length() > 0 && !Protocol.ROLE_RECV.equals(to) && !Protocol.ROLE_ORDER.equals(to)
+                    && !to.equals(com.couple.xiaowo.core.Client.id(act))) {
+                return;
+            }
+            if (Protocol.TYPE_APK_INFO.equals(type)) {
+                com.couple.xiaowo.core.ApkMqtt.onInfo(payload);
+                return;
+            }
+            if (Protocol.TYPE_APK_PART.equals(type)) {
+                com.couple.xiaowo.core.ApkMqtt.onPart(payload);
+                return;
+            }
             if (Protocol.TYPE_ORDER_ACK.equals(type)) {
                 java.util.Map<String, Object> m = Json.asObject(Json.parse(payload));
                 handleOrderAck(Json.str(m, "id", ""));
@@ -1000,18 +1034,58 @@ public class OrderScreen extends LinearLayout {
             toastOk("张老师那边有新版 v" + info.versionName + "（你这版是 "
                     + Ui.appVersion(act) + "）");
             /*
-             * 中转能拿到"有新版"，但传不了 6MB 的包。
-             * 所以这里明确告诉用户下一步怎么做，而不是假装能下。
+             * 以前这里只能提示"传不动"，现在走 MQTT 分块，异地也能更新。
              */
-            DialogKit.confirm(act, "有新版本",
-                    "张老师那边是 v" + info.versionName + "，你是 " + Ui.appVersion(act) + "。\n\n"
-                            + "安装包有 6MB，中转通道传不动。\n"
-                            + "请在同一个 Wi-Fi 下打开这个页面点「检查并更新」，\n"
-                            + "或者让张老师直接把 APK 发给你。",
-                    "知道了", null);
+            startMqttUpdate(info);
         } else {
             toast("已经是最新版了（" + Ui.appVersion(act) + "）");
         }
+    }
+
+    /**
+     * 经中转把更新包拉下来（分块，见 core/ApkMqtt）。
+     *
+     * 这条和"同一个 Wi-Fi 直连下载"是并列的：直连快，中转能跨网络。
+     */
+    private void startMqttUpdate(final ApkRelay.Info info) {
+        if (com.couple.xiaowo.core.ApkMqtt.busy()) {
+            toast("正在接收安装包了，别急…");
+            return;
+        }
+        Toast2.show(act, Toast2.LOADING, "正在接收 v" + info.versionName + "…（走中转，慢一点）");
+        com.couple.xiaowo.core.ApkMqtt.start(act, new com.couple.xiaowo.core.ApkMqtt.Listener() {
+            public void onProgress(int percent, String note) {
+                if (percent % 20 == 0) {
+                    Toast2.show(act, Toast2.LOADING, note);
+                }
+            }
+
+            public void onDone(final java.io.File apk, final int vc, final String vn) {
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        if (!Updater.canInstall(act)) {
+                            Toast2.warn(act, "需要允许「安装未知应用」才能自动更新");
+                            Updater.requestInstallPermission(act);
+                            return;
+                        }
+                        String err = Updater.install(act, apk);
+                        if (err != null) {
+                            Toast2.warn(act, "安装包收好了，但调不起安装器：" + err);
+                        } else {
+                            Toast2.ok(act, "正在安装 v" + vn);
+                        }
+                    }
+                });
+            }
+
+            public void onError(final String msg) {
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        Toast2.warn(act, "更新没成功：" + msg);
+                    }
+                });
+            }
+        });
     }
 
     private void autoDiscover(final boolean verbose) {
@@ -1905,6 +1979,27 @@ public class OrderScreen extends LinearLayout {
         upLp.topMargin = dp(12);
         content.addView(UpdateCard.build(act), upLp);
 
+        // ---------- 专业模式 ----------
+        /*
+         * 默认是"给普通人看的版本"：不出现端口、QoS、broker 这些词。
+         * 打开之后才把技术细节放出来，方便自己调试。
+         */
+        final TextView proBtn = Ui.pill(act,
+                Ui.pro(act) ? "🧑‍🔧 专业模式：开" : "🧑‍🔧 专业模式：关",
+                Ui.pro(act) ? Ui.PRIMARY : Ui.PRIMARY_SOFT,
+                Ui.pro(act) ? 0xFFFFFFFF : Ui.PRIMARY_DEEP, 12, 22, 9, true);
+        proBtn.setOnClickListener(new OnClickListener() {
+            public void onClick(View v) {
+                Ui.setPro(act, !Ui.pro(act));
+                Toast2.ok(act, Ui.pro(act) ? "专业模式已打开" : "已切换到简洁模式");
+                switchTab(TAB_ME);
+            }
+        });
+        LinearLayout.LayoutParams proLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        proLp.topMargin = dp(12);
+        content.addView(proBtn, proLp);
+
         // ---------- 连接 / 清空 ----------
         TextView conn = Ui.pill(act, "⇄ 连接设置", Ui.PRIMARY_SOFT, Ui.PRIMARY_DEEP, 12, 22, 9, true);
         conn.setOnClickListener(new OnClickListener() {
@@ -2196,6 +2291,12 @@ public class OrderScreen extends LinearLayout {
             return "⇄ 直连 " + peerHost + ":" + peerPort;
         }
         if (room != null) {
+            if (Relay.MODE_CLOUD.equals(Relay.mode(act))) {
+                return "🌐 异地连接：小窝云";
+            }
+            if (Relay.MODE_SELF.equals(Relay.mode(act))) {
+                return "🌐 自建服务器 · 房间 " + room;
+            }
             return "🌐 中转已配对 · 房间 " + room;
         }
         return "⇄ 未连接（点这里配一下）";
@@ -2802,6 +2903,7 @@ public class OrderScreen extends LinearLayout {
     private void sendChat(final String text) {
         Social.Msg m = new Social.Msg();
         m.who = "cat";
+        m.from = com.couple.xiaowo.core.Client.id(act);
         m.text = text;
         m.ts = System.currentTimeMillis();
         m.mine = true;

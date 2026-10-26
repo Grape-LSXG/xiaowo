@@ -84,29 +84,38 @@ public final class Mqtt {
         try {
             Cloud.load(c);
             SharedPreferences sp = c.getSharedPreferences("xiaowo", Context.MODE_PRIVATE);
+            // 先按"用户手填过的服务器"读一遍，Relay.mode 会用到 hasOwnBroker()
             String h = sp.getString(SP_HOST, "");
             cfgHost = (h == null || h.trim().length() == 0) ? null : h.trim();
             cfgPort = sp.getInt(SP_PORT, PORT);
-            cfgPreset = false;
-            if (cfgHost == null && Cloud.has()) {
-                // 用户没配过自建服务器 → 用打包进来的云端预置（EMQX Serverless 之类）
+            cfgUser = null;
+            cfgPass = null;
+            cfgTls = false;
+
+            String mode = Relay.mode(c);
+            if (Relay.MODE_CLOUD.equals(mode) && Cloud.has()) {
                 cfgHost = Cloud.host();
                 cfgPort = Cloud.port();
-                cfgPreset = true;
-            }
-            if (cfgPort <= 0 || cfgPort > 65535) {
-                cfgPort = PORT;
-            }
-            String u = sp.getString(SP_USER, "");
-            cfgUser = (u == null || u.trim().length() == 0) ? null : u.trim();
-            String pw = sp.getString(SP_PASS, "");
-            cfgPass = (pw == null || pw.length() == 0) ? null : pw;
-            cfgTls = sp.getBoolean(SP_TLS, false);
-            if (cfgPreset) {
-                // 预置模式：账号密码/TLS 也跟着预置走（用户手动保存过的另说——那样 cfgHost 就不是预置了）
                 cfgUser = Cloud.user();
                 cfgPass = Cloud.pass();
                 cfgTls = Cloud.tls();
+                cfgPreset = true;
+            } else if (Relay.MODE_SELF.equals(mode)) {
+                String u = sp.getString(SP_USER, "");
+                cfgUser = (u == null || u.trim().length() == 0) ? null : u.trim();
+                String pw = sp.getString(SP_PASS, "");
+                cfgPass = (pw == null || pw.length() == 0) ? null : pw;
+                cfgTls = sp.getBoolean(SP_TLS, false);
+                cfgPreset = false;
+            } else {
+                // 公共 broker：不填地址就按 room 哈希轮换，明文、免账号
+                cfgHost = null;
+                cfgPort = PORT;
+                cfgTls = false;
+                cfgPreset = false;
+            }
+            if (cfgPort <= 0 || cfgPort > 65535) {
+                cfgPort = PORT;
             }
             String uid = sp.getString(SP_UID, "");
             if (uid == null || uid.length() == 0) {
@@ -137,6 +146,8 @@ public final class Mqtt {
                 .putString(SP_PASS, pass == null ? "" : pass)
                 .putBoolean(SP_TLS, tls)
                 .apply();
+        // 存了自建服务器 = 明确表示"我要用自己这台"
+        Relay.setMode(c, Relay.MODE_SELF);
         configure(c);
     }
 

@@ -51,6 +51,11 @@ public final class Social {
         public String text = "";
         public long ts = 0L;
         public boolean mine = false;
+        /**
+         * 发信那一台的识别码（多台点单端时用来看清"这句是谁说的"）。
+         * 老版本没有这个字段，读出来是空串，界面就退回原样。
+         */
+        public String from = "";
 
         public String toJson() {
             /*
@@ -64,6 +69,7 @@ public final class Social {
             return Json.object(Json.fields(
                     "type", Json.quote(Protocol.TYPE_CHAT),
                     "who", Json.quote(who),
+                    "from", Json.quote(from),
                     "text", Json.quote(text),
                     "mine", mine ? "true" : "false",
                     "ts", String.valueOf(ts)));
@@ -73,6 +79,7 @@ public final class Social {
             Map<String, Object> m = Json.asObject(Json.parse(body));
             Msg g = new Msg();
             g.who = Json.str(m, "who", "cat");
+            g.from = Json.str(m, "from", "");
             g.text = Json.str(m, "text", "");
             g.ts = Json.num(m, "ts", System.currentTimeMillis());
             return g;

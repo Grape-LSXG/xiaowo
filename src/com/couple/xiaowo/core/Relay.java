@@ -31,26 +31,63 @@ public final class Relay {
 
     public static final String KEY_ROOM = "relay_room";
     public static final String KEY_ON = "relay_on";
+    /**
+     * 异地用哪种通道。UI 上就是三个按钮，代码只认这一个值，
+     * 避免再出现"界面写着房间码、实际连的是服务器"这种对不上的情况。
+     *
+     *   cloud  —— 小窝云（APK 里预置的服务器 + 预置房间）
+     *   public —— 公共 broker + 自己编的房间码
+     *   self   —— 自己搭的服务器 + 房间码（其实是 topic 的一部分）
+     */
+    public static final String KEY_MODE = "relay_mode";
+    public static final String MODE_CLOUD = "cloud";
+    public static final String MODE_PUBLIC = "public";
+    public static final String MODE_SELF = "self";
 
     private Relay() {
     }
 
-    public static String room(Context c) {
-        String r = sp(c).getString(KEY_ROOM, null);
-        if (r != null && r.length() > 0) {
-            return r;
+    public static String mode(Context c) {
+        String m = sp(c).getString(KEY_MODE, null);
+        if (MODE_CLOUD.equals(m) || MODE_PUBLIC.equals(m) || MODE_SELF.equals(m)) {
+            return m;
         }
-        // 没配过房间码、但 APK 里预置了云端：
-        // 两端都用预置房间码，装好即通，点单端不用再扫码/填码。
+        // 没选过：预置了云端就是云，否则看有没有手填的服务器
         Cloud.load(c);
-        if (Cloud.has() && Cloud.room() != null) {
-            return Cloud.room();
+        if (Cloud.has()) {
+            return MODE_CLOUD;
         }
-        return null;
+        if (Mqtt.hasOwnBroker()) {
+            return MODE_SELF;
+        }
+        return MODE_PUBLIC;
+    }
+
+    public static void setMode(Context c, String mode) {
+        sp(c).edit().putString(KEY_MODE, mode).apply();
+    }
+
+    /** 这个模式下房间码是不是"用户自己的"（云模式用预置的，改也改不动） */
+    public static boolean roomEditable(Context c) {
+        return !MODE_CLOUD.equals(mode(c));
+    }
+
+    public static String room(Context c) {
+        String m = mode(c);
+        if (MODE_CLOUD.equals(m)) {
+            Cloud.load(c);
+            return Cloud.has() ? Cloud.room() : null;
+        }
+        String r = sp(c).getString(KEY_ROOM, null);
+        return (r != null && r.length() > 0) ? r : null;
     }
 
     public static void setRoom(Context c, String room) {
         sp(c).edit().putString(KEY_ROOM, room).apply();
+        // 手动填了房间码，说明想用自己这套，别继续挂在云模式上
+        if (MODE_CLOUD.equals(sp(c).getString(KEY_MODE, null))) {
+            sp(c).edit().putString(KEY_MODE, MODE_PUBLIC).apply();
+        }
     }
 
     public static boolean enabled(Context c) {
@@ -58,10 +95,8 @@ public final class Relay {
         if (r == null) {
             return false;
         }
-        // 用预置房间码时一律算开启：用户没手动配过、也没手动关过，
-        // 就不该被以前遗留的 KEY_ON=false 挡住（否则装好还是连不上）。
-        boolean local = sp(c).getString(KEY_ROOM, null) != null;
-        if (!local) {
+        // 云模式的房间是预置的，没有"关掉"这一说
+        if (MODE_CLOUD.equals(mode(c))) {
             return true;
         }
         return sp(c).getBoolean(KEY_ON, true);
